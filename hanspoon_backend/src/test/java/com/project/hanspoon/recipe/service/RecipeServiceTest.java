@@ -1,7 +1,6 @@
 package com.project.hanspoon.recipe.service;
 
 import com.project.hanspoon.common.user.repository.UserRepository;
-import com.project.hanspoon.recipe.component.RecipeParser;
 import com.project.hanspoon.recipe.dto.IngredientDto;
 import com.project.hanspoon.recipe.dto.IngredientGroupDto;
 import com.project.hanspoon.recipe.dto.InstructionDto;
@@ -34,10 +33,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -58,8 +53,6 @@ class RecipeServiceTest {
     @Mock
     private RecipeRelationRepository recipeRelationRepository;
     @Mock
-    private RecipeParser recipeParser;
-    @Mock
     private RecipeWishesRepository recipeWishesRepository;
     @Mock
     private RecipeRevRepository recipeRevRepository;
@@ -76,7 +69,6 @@ class RecipeServiceTest {
                 instructionRepository,
                 instructionGroupRepository,
                 recipeRelationRepository,
-                recipeParser,
                 recipeWishesRepository,
                 recipeRevRepository,
                 userRepository,
@@ -147,7 +139,6 @@ class RecipeServiceTest {
 
         assertEquals("@밀가루 넣기", dto.getInstructionGroup().get(0).getInstructions().get(0).getContent());
         assertFalse(dto.isWished());
-        verify(recipeParser, never()).parse(anyString(), anyMap(), eq(1.0));
     }
 
     @Test

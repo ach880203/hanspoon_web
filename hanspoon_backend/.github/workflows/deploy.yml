@@ -1,29 +1,69 @@
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-name: CI
+name: Deploy to EC2
 
 on:
-  pull_request:
-    branches: [ "dev", "main" ]
   push:
-    branches: [ "dev" ]
+    branches: [ "main" ]
 
 jobs:
-  build-test:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      # ---- Backend build ----
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Build backend
+        working-directory: hanspoon_backend
+        run: ./gradlew clean build -x test
 
-      - name: Build & Test
-        run: ./gradlew clean build
+      # ---- Upload + Deploy ----
+      - name: Copy artifacts to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: |
+            hanspoon_backend/build/libs/*.jar
+          target: /opt/hanspoon/releases/${{ github.sha }}
+
+      - name: Activate release & restart
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            RELEASE_DIR="/opt/hanspoon/releases/${{ github.sha }}"
+            CURRENT_LINK="/opt/hanspoon/current"
+
+            mkdir -p "$RELEASE_DIR/backend" "$RELEASE_DIR/frontend"
+
+            # 백엔드 jar 이동(파일명은 프로젝트마다 다르니 app.jar로 통일)
+            JAR_PATH=$(ls -1 $RELEASE_DIR/backend/build/libs/*.jar 2>/dev/null || true)
+            if [ -z "$JAR_PATH" ]; then
+              # scp가 target에 그대로 구조를 만들 수 있어서 한번 더 탐색
+              JAR_PATH=$(find "$RELEASE_DIR" -name "*.jar" | head -n 1)
+            fi
+            cp "$JAR_PATH" "$RELEASE_DIR/backend/app.jar"
+
+            # 프런트 dist 위치 정리
+            if [ -d "$RELEASE_DIR/frontend/dist" ]; then
+              cp -r "$RELEASE_DIR/frontend/dist/." "$RELEASE_DIR/frontend/"
+              rm -rf "$RELEASE_DIR/frontend/dist"
+            fi
+
+            ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+
+            sudo systemctl restart hanspoon-backend
+            sudo systemctl restart nginx
