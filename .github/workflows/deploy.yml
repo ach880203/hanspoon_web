@@ -1,0 +1,97 @@
+name: Deploy Fullstack to EC2
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -------------------------
+      # Backend build (Spring Boot)
+      # -------------------------
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Build backend
+        working-directory: hanspoon_backend
+        run: ./gradlew clean build -x test
+
+      # -------------------------
+      # Frontend build (Vite)
+      # -------------------------
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: hanspoon_frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: hanspoon_frontend
+        env:
+          # 프런트에서 필요한 환경변수(필요한 것만)
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+        run: |
+          npm ci
+          npm run build
+
+      # -------------------------
+      # Upload artifacts to EC2
+      # -------------------------
+      - name: Copy backend JAR to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: hanspoon_backend/build/libs/*.jar
+          target: /opt/hanspoon/releases/${{ github.sha }}/backend/
+
+      - name: Copy frontend dist to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: hanspoon_frontend/dist/*
+          target: /opt/hanspoon/releases/${{ github.sha }}/frontend/
+
+      # -------------------------
+      # Activate release & restart
+      # -------------------------
+      - name: Activate & Restart
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            RELEASE_DIR="/opt/hanspoon/releases/${{ github.sha }}"
+            CURRENT_LINK="/opt/hanspoon/current"
+
+            # --- backend: jar 파일명을 app.jar로 통일 ---
+            JAR_PATH=$(find "$RELEASE_DIR/backend" -maxdepth 2 -name "*.jar" | head -n 1)
+            if [ -z "$JAR_PATH" ]; then
+              echo " JAR not found in $RELEASE_DIR/backend"
+              exit 1
+            fi
+            cp "$JAR_PATH" "$RELEASE_DIR/backend/app.jar"
+
+            # --- current 링크 교체 ---
+            ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+
+            # --- 서비스 재시작 ---
+            sudo systemctl restart hanspoon-backend
+            sudo systemctl reload nginx
