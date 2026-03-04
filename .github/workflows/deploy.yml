@@ -264,12 +264,32 @@ jobs:
               exit 1
             fi
 
-            echo "[배포] 번들 복사"
-            if ! ${SUDO} cp -a "${PAYLOAD_DIR}/." "${RELEASE_DIR}/"; then
-              echo "번들 복사 실패: ${PAYLOAD_DIR} -> ${RELEASE_DIR}"
+            echo "[배포] 번들 복사(파일 단위)"
+            if ! ${SUDO} mkdir -p "${RELEASE_DIR}/backend" "${RELEASE_DIR}/frontend"; then
+              echo "하위 디렉토리 생성 실패: ${RELEASE_DIR}"
               ${SUDO} ls -ld "${RELEASE_DIR}" || true
               ${SUDO} df -h || true
               exit 1
+            fi
+
+            if ! ${SUDO} cp "${PAYLOAD_DIR}/backend/app.jar" "${RELEASE_DIR}/backend/app.jar"; then
+              echo "app.jar 복사 실패"
+              ${SUDO} ls -l "${PAYLOAD_DIR}/backend" || true
+              exit 1
+            fi
+            if ! ${SUDO} cp "${PAYLOAD_DIR}/backend/.env" "${RELEASE_DIR}/backend/.env"; then
+              echo ".env 복사 실패"
+              ${SUDO} ls -la "${PAYLOAD_DIR}/backend" || true
+              exit 1
+            fi
+            if ! ${SUDO} cp -r "${PAYLOAD_DIR}/frontend/." "${RELEASE_DIR}/frontend/"; then
+              echo "frontend 복사 실패"
+              ${SUDO} ls -la "${PAYLOAD_DIR}/frontend" || true
+              ${SUDO} df -h || true
+              exit 1
+            fi
+            if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
+              ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"
             fi
 
             if ! ${SUDO} test -f "${RELEASE_DIR}/backend/app.jar"; then
