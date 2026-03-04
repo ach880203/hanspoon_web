@@ -195,13 +195,21 @@ jobs:
           script_stop: true
           envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
           script: |
+            bash -se <<'BASH_SCRIPT'
             set -euo pipefail
+
+            echo "[배포] 스크립트 시작"
+            echo "[배포] 사용자: $(whoami)"
+
+            if ! command -v systemctl >/dev/null 2>&1; then
+              echo "systemctl 명령이 없어 배포를 중단합니다."
+              exit 1
+            fi
 
             APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
             SERVICE_NAME="${SERVICE_NAME:-}"
             KEEP_RELEASES="${KEEP_RELEASES:-5}"
 
-            # 서비스 이름이 환경마다 달라서(예: hanspoon-backend / hanspoon) 자동 탐색합니다.
             if [ -z "${SERVICE_NAME}" ]; then
               if systemctl list-unit-files | grep -q '^hanspoon-backend.service'; then
                 SERVICE_NAME="hanspoon-backend"
@@ -217,11 +225,20 @@ jobs:
               KEEP_RELEASES="5"
             fi
 
+            SUDO="sudo"
+            if [ "$(id -u)" -eq 0 ]; then
+              SUDO=""
+            elif ! sudo -n true >/dev/null 2>&1; then
+              echo "현재 계정은 비밀번호 없는 sudo 권한이 없어 배포를 중단합니다."
+              exit 1
+            fi
+
             TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
             BUNDLE_PATH="${TMP_DIR}/deploy_bundle.tar.gz"
             RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
             CURRENT_LINK="${APP_ROOT}/current"
 
+            echo "[배포] 번들 경로 확인: ${BUNDLE_PATH}"
             if [ ! -f "${BUNDLE_PATH}" ]; then
               BUNDLE_PATH="$(find "${TMP_DIR}" -maxdepth 2 -type f -name 'deploy_bundle.tar.gz' | head -n 1)"
             fi
@@ -246,6 +263,7 @@ jobs:
               exit 1
             fi
             chmod 600 "${RELEASE_DIR}/backend/.env"
+
             if [ -f "${RELEASE_DIR}/deploy.md" ]; then
               echo "배포 문서 확인: ${RELEASE_DIR}/deploy.md"
             else
@@ -254,6 +272,7 @@ jobs:
 
             ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
+            echo "[배포] 서비스명: ${SERVICE_NAME}"
             if ! systemctl list-unit-files | grep -q "^${SERVICE_NAME}\\.service"; then
               echo "배포 대상 서비스(${SERVICE_NAME})를 찾지 못했습니다."
               echo "등록된 서비스 예시:"
@@ -261,14 +280,14 @@ jobs:
               exit 1
             fi
 
-            sudo systemctl restart "${SERVICE_NAME}"
-            sudo systemctl is-active --quiet "${SERVICE_NAME}" || {
-              sudo journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
+            ${SUDO} systemctl restart "${SERVICE_NAME}"
+            ${SUDO} systemctl is-active --quiet "${SERVICE_NAME}" || {
+              ${SUDO} journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
               exit 1
             }
 
             if systemctl list-unit-files | grep -q '^nginx.service'; then
-              sudo systemctl reload nginx || sudo systemctl restart nginx
+              ${SUDO} systemctl reload nginx || ${SUDO} systemctl restart nginx
             else
               echo "nginx 서비스가 없어 재시작을 건너뜁니다."
             fi
@@ -288,7 +307,7 @@ jobs:
 
               if [ "${HEALTH_OK}" != "1" ]; then
                 echo "헬스체크에 실패했습니다: ${HEALTHCHECK_URL}"
-                sudo journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
+                ${SUDO} journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
                 exit 1
               fi
             fi
@@ -299,3 +318,5 @@ jobs:
             fi
 
             rm -rf "${TMP_DIR}" || true
+            echo "[배포] 완료"
+            BASH_SCRIPT
