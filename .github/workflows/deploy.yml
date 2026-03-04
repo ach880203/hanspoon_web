@@ -217,8 +217,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 DNS
-          FALLBACK_HOST="ec2-3-36-180-241.ap-northeast-2.compute.amazonaws.com"
+          # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 IP
+          FALLBACK_HOST="3.36.180.241"
 
           HOST="${EC2_HOST}"
           PORT="${EC2_PORT:-22}"
@@ -251,11 +251,18 @@ jobs:
           if [ "${IS_PRIVATE_IP}" = "1" ]; then
             echo "::warning::EC2_HOST(${HOST})가 사설 IP 대역으로 해석되어 폴백 호스트로 전환합니다."
             HOST="${FALLBACK_HOST}"
+            RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
           fi
 
-          echo "host=${HOST}" >> "${GITHUB_OUTPUT}"
+          FINAL_HOST="${HOST}"
+          FIRST_PUBLIC_IP="$(printf '%s\n' ${RESOLVED_IPS} | head -n 1)"
+          if [ -n "${FIRST_PUBLIC_IP}" ]; then
+            FINAL_HOST="${FIRST_PUBLIC_IP}"
+          fi
+
+          echo "host=${FINAL_HOST}" >> "${GITHUB_OUTPUT}"
           echo "port=${PORT}" >> "${GITHUB_OUTPUT}"
-          echo "[결정] 최종 배포 대상: ${HOST}:${PORT}"
+          echo "[결정] 최종 배포 대상: ${FINAL_HOST}:${PORT}"
 
       # ----------------------------
       # 7) 업로드 전 SSH 포트 연결 점검
