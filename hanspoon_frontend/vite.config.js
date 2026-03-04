@@ -21,12 +21,18 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           // 경고를 숨기지 않고, 실제로 번들을 분리해 초기 로드 청크 크기를 낮춥니다.
+          // 이전 고정 청크 규칙은 vendor <-> react-vendor 순환 의존을 만들어
+          // 프로덕션에서 React 객체가 초기화되기 전에 참조되는 문제가 있었습니다.
+          // 패키지 단위로 안정적으로 나눠 순환 청크 가능성을 줄입니다.
           manualChunks(id) {
             if (!id.includes("node_modules")) return;
-            if (id.includes("react-router-dom") || id.includes("react-router")) return "router";
-            if (id.includes("react-dom") || id.includes("react")) return "react-vendor";
-            if (id.includes("axios")) return "axios";
-            return "vendor";
+            const afterNodeModules = id.split("node_modules/")[1] || "";
+            const segments = afterNodeModules.split("/");
+            const first = segments[0] || "";
+            const second = segments[1] || "";
+            const pkg = first.startsWith("@") ? `${first}/${second}` : first;
+            if (!pkg) return "vendor";
+            return `pkg-${pkg.replace("@", "").replace("/", "-")}`;
           },
         },
       },
