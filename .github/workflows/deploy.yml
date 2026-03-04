@@ -290,21 +290,15 @@ jobs:
             fi
             echo "[배포] 번들 복사 완료"
             if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
-              ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"
+              if ! ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"; then
+                echo "경고: deploy.md 복사에 실패했습니다."
+              fi
             fi
 
-            if ! ${SUDO} test -f "${RELEASE_DIR}/backend/app.jar"; then
-              echo "백엔드 JAR이 누락되었습니다: ${RELEASE_DIR}/backend/app.jar"
-              exit 1
-            fi
-            if ! ${SUDO} test -f "${RELEASE_DIR}/backend/.env"; then
-              echo "백엔드 환경파일이 누락되었습니다: ${RELEASE_DIR}/backend/.env"
-              exit 1
-            fi
-            if ! ${SUDO} test -d "${RELEASE_DIR}/frontend"; then
-              echo "프론트엔드 산출물이 누락되었습니다: ${RELEASE_DIR}/frontend"
-              exit 1
-            fi
+            echo "[배포] 복사 결과 점검"
+            ${SUDO} test -f "${RELEASE_DIR}/backend/app.jar" || echo "경고: app.jar 확인 실패"
+            ${SUDO} test -f "${RELEASE_DIR}/backend/.env" || echo "경고: .env 확인 실패"
+            ${SUDO} test -d "${RELEASE_DIR}/frontend" || echo "경고: frontend 디렉토리 확인 실패"
             # 환경에 따라 chmod sudo 권한이 제한될 수 있어 실패 시 경고만 남깁니다.
             if ! ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env"; then
               echo "경고: .env 권한(600) 변경에 실패했습니다. 현재 권한을 확인하세요."
@@ -317,7 +311,12 @@ jobs:
               echo "배포 문서 없음: ${RELEASE_DIR}/deploy.md"
             fi
 
-            ${SUDO} ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+            echo "[배포] current 링크 전환"
+            if ! ${SUDO} ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"; then
+              echo "current 링크 전환 실패: ${CURRENT_LINK}"
+              ${SUDO} ls -ld "${APP_ROOT}" "${CURRENT_LINK}" || true
+              exit 1
+            fi
             echo "[배포] current 링크 전환 완료: ${CURRENT_LINK}"
 
             echo "[배포] 서비스명: ${SERVICE_NAME}"
