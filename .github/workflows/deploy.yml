@@ -29,6 +29,7 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_PORT: ${{ secrets.EC2_PORT }}
 
           SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
           SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
@@ -84,6 +85,12 @@ jobs:
               exit 1
             fi
           done
+
+          # 포트는 선택값이지만, 지정했다면 숫자 형식이어야 합니다.
+          if [ -n "${EC2_PORT:-}" ] && ! [[ "${EC2_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::GitHub Secrets의 EC2_PORT 값은 숫자여야 합니다. (예: 22)"
+            exit 1
+          fi
 
       # ----------------------------
       # 2) 런타임/빌드 환경파일 생성
@@ -214,6 +221,29 @@ jobs:
           PORT="${EC2_PORT:-22}"
 
           echo "[점검] 대상: ${HOST}:${PORT}"
+
+          # 호스트가 DNS로 해석되는지 먼저 확인합니다.
+          RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+          if [ -z "${RESOLVED_IPS}" ]; then
+            echo "::error::EC2_HOST(${HOST}) DNS 해석에 실패했습니다. 오타/만료된 DNS/잘못된 호스트값을 확인하세요."
+            exit 1
+          fi
+
+          echo "[점검] 해석된 IPv4: ${RESOLVED_IPS}"
+
+          # GitHub Hosted Runner는 인터넷에서 접속하므로 사설IP 대상은 연결할 수 없습니다.
+          IS_PRIVATE_IP="0"
+          for ip in ${RESOLVED_IPS}; do
+            if [[ "${ip}" =~ ^10\. ]] || [[ "${ip}" =~ ^192\.168\. ]] || [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+              IS_PRIVATE_IP="1"
+              break
+            fi
+          done
+          if [ "${IS_PRIVATE_IP}" = "1" ]; then
+            echo "::error::EC2_HOST(${HOST})가 사설 IP 대역으로 해석됩니다. GitHub Hosted Runner에서 직접 SSH/SCP 접속할 수 없습니다."
+            echo "::error::공인 IP/EIP 또는 공인 DNS를 사용하거나, self-hosted runner(같은 VPC) 또는 SSM 방식으로 전환하세요."
+            exit 1
+          fi
 
           if ! timeout 8 bash -c "cat < /dev/null > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
             echo "::error::GitHub Runner에서 ${HOST}:${PORT} TCP 접속에 실패했습니다(i/o timeout 가능)."
