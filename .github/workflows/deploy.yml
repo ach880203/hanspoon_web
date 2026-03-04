@@ -219,6 +219,7 @@ jobs:
 
           # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 IP
           FALLBACK_HOST="3.36.180.241"
+          FALLBACK_PORT="22"
 
           HOST="${EC2_HOST}"
           PORT="${EC2_PORT:-22}"
@@ -258,6 +259,13 @@ jobs:
           FIRST_PUBLIC_IP="$(printf '%s\n' ${RESOLVED_IPS} | head -n 1)"
           if [ -n "${FIRST_PUBLIC_IP}" ]; then
             FINAL_HOST="${FIRST_PUBLIC_IP}"
+          fi
+
+          # 시크릿의 HOST/PORT가 실제로 닿지 않으면, 공인 IP:22로 자동 폴백합니다.
+          if ! timeout 6 bash -c "cat < /dev/null > /dev/tcp/${FINAL_HOST}/${PORT}" 2>/dev/null; then
+            echo "::warning::시크릿 배포 대상(${FINAL_HOST}:${PORT}) 연결 실패. 폴백(${FALLBACK_HOST}:${FALLBACK_PORT})로 전환합니다."
+            FINAL_HOST="${FALLBACK_HOST}"
+            PORT="${FALLBACK_PORT}"
           fi
 
           echo "host=${FINAL_HOST}" >> "${GITHUB_OUTPUT}"
