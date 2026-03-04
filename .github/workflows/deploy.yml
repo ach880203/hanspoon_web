@@ -88,8 +88,7 @@ jobs:
 
           # 포트는 선택값이지만, 지정했다면 숫자 형식이어야 합니다.
           if [ -n "${EC2_PORT:-}" ] && ! [[ "${EC2_PORT}" =~ ^[0-9]+$ ]]; then
-            echo "::error::GitHub Secrets의 EC2_PORT 값은 숫자여야 합니다. (예: 22)"
-            exit 1
+            echo "::warning::GitHub Secrets의 EC2_PORT 값이 숫자가 아닙니다. 기본 포트 22를 사용합니다."
           fi
 
       # ----------------------------
@@ -206,10 +205,11 @@ jobs:
           fi
 
       # ----------------------------
-      # 6) 업로드 전 SSH 포트 연결 점검
-      #   - 네트워크 차단(SG/NACL/라우팅/사설IP) 시 여기서 빠르게 실패시킴
+      # 6) 배포 대상(호스트/포트) 정규화
+      #   - 시크릿 값이 잘못되어도 공인 호스트/기본 포트로 자동 폴백
       # ----------------------------
-      - name: EC2 SSH 연결 사전 점검
+      - name: 배포 대상 결정
+        id: deploy_target
         shell: bash
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -217,8 +217,60 @@ jobs:
         run: |
           set -euo pipefail
 
+          # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 DNS
+          FALLBACK_HOST="ec2-3-36-180-241.ap-northeast-2.compute.amazonaws.com"
+
           HOST="${EC2_HOST}"
           PORT="${EC2_PORT:-22}"
+
+          if [ -n "${PORT}" ] && ! [[ "${PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::warning::EC2_PORT(${PORT})가 숫자가 아니어서 22로 대체합니다."
+            PORT="22"
+          fi
+
+          if [ -z "${HOST}" ]; then
+            echo "::warning::EC2_HOST가 비어 있어 폴백 호스트를 사용합니다."
+            HOST="${FALLBACK_HOST}"
+          fi
+
+          RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+          if [ -z "${RESOLVED_IPS}" ]; then
+            echo "::warning::EC2_HOST(${HOST}) DNS 해석에 실패해 폴백 호스트로 전환합니다."
+            HOST="${FALLBACK_HOST}"
+            RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+          fi
+
+          # GitHub Hosted Runner에서 사설IP는 접속 불가라 폴백합니다.
+          IS_PRIVATE_IP="0"
+          for ip in ${RESOLVED_IPS}; do
+            if [[ "${ip}" =~ ^10\. ]] || [[ "${ip}" =~ ^192\.168\. ]] || [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+              IS_PRIVATE_IP="1"
+              break
+            fi
+          done
+          if [ "${IS_PRIVATE_IP}" = "1" ]; then
+            echo "::warning::EC2_HOST(${HOST})가 사설 IP 대역으로 해석되어 폴백 호스트로 전환합니다."
+            HOST="${FALLBACK_HOST}"
+          fi
+
+          echo "host=${HOST}" >> "${GITHUB_OUTPUT}"
+          echo "port=${PORT}" >> "${GITHUB_OUTPUT}"
+          echo "[결정] 최종 배포 대상: ${HOST}:${PORT}"
+
+      # ----------------------------
+      # 7) 업로드 전 SSH 포트 연결 점검
+      #   - 네트워크 차단(SG/NACL/라우팅/사설IP) 시 여기서 빠르게 실패시킴
+      # ----------------------------
+      - name: EC2 SSH 연결 사전 점검
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ steps.deploy_target.outputs.host }}
+          DEPLOY_PORT: ${{ steps.deploy_target.outputs.port }}
+        run: |
+          set -euo pipefail
+
+          HOST="${DEPLOY_HOST}"
+          PORT="${DEPLOY_PORT}"
 
           echo "[점검] 대상: ${HOST}:${PORT}"
 
@@ -254,22 +306,22 @@ jobs:
           echo "[점검] SSH 포트 연결 가능"
 
       # ----------------------------
-      # 7) EC2로 업로드(SCP)
+      # 8) EC2로 업로드(SCP)
       # ----------------------------
       - name: EC2로 배포 번들 업로드
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ steps.deploy_target.outputs.host }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT || 22 }}
+          port: ${{ steps.deploy_target.outputs.port }}
           source: deploy_bundle
           target: /tmp/hanspoon/${{ github.sha }}
           overwrite: true
           timeout: 2m
 
       # ----------------------------
-      # 8) EC2에서 배포 실행(릴리즈 + current 링크 + 서비스 재시작)
+      # 9) EC2에서 배포 실행(릴리즈 + current 링크 + 서비스 재시작)
       #   - Terraform userdata 기준 경로:
       #     /opt/hanspoon/current/backend/app.jar
       #     /opt/hanspoon/current/frontend/ (nginx root)
@@ -285,10 +337,10 @@ jobs:
           HEALTHCHECK_DELAY: ${{ secrets.EC2_HEALTHCHECK_DELAY }}
           KEEP_RELEASES: ${{ secrets.EC2_KEEP_RELEASES }}
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ steps.deploy_target.outputs.host }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT || 22 }}
+          port: ${{ steps.deploy_target.outputs.port }}
           command_timeout: 30m
           script_stop: true
           envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
