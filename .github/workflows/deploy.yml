@@ -1,19 +1,113 @@
-name: Backend Deploy (app.jar)
+name: AWS 배포
 
 on:
   push:
-    branches: ["main"]     # main에 머지되면 자동 배포
-  workflow_dispatch: {}     # 수동 실행 버튼
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: aws-deploy-main
+  cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  deploy:
+    name: EC2 배포
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-      - name: 체크아웃
+      - name: 저장소 체크아웃
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: 배포/앱 시크릿 검사
+        shell: bash
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+          OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
+          OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
+          OAUTH_KAKAO_CLIENT_ID: ${{ secrets.OAUTH_KAKAO_CLIENT_ID }}
+          OAUTH_KAKAO_CLIENT_SECRET: ${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRATION: ${{ secrets.JWT_EXPIRATION }}
+          PORTONE_STORE_ID: ${{ secrets.PORTONE_STORE_ID }}
+          PORTONE_API_SECRET: ${{ secrets.PORTONE_API_SECRET }}
+          PORTONE_CHANNEL_KEY_KAKAO: ${{ secrets.PORTONE_CHANNEL_KEY_KAKAO }}
+          PORTONE_CHANNEL_KEY_TOSS: ${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}
+          PORTONE_CHANNEL_KEY_TOSS_PAYMENTS: ${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          VITE_KAKAO_JS_KEY: ${{ secrets.VITE_KAKAO_JS_KEY }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED_KEYS=(
+            EC2_HOST
+            EC2_USER
+            EC2_SSH_KEY
+            SPRING_DATASOURCE_URL
+            SPRING_DATASOURCE_USERNAME
+            SPRING_DATASOURCE_PASSWORD
+            OAUTH_GOOGLE_CLIENT_ID
+            OAUTH_GOOGLE_CLIENT_SECRET
+            OAUTH_KAKAO_CLIENT_ID
+            OAUTH_KAKAO_CLIENT_SECRET
+            JWT_SECRET
+            JWT_EXPIRATION
+            PORTONE_STORE_ID
+            PORTONE_API_SECRET
+            PORTONE_CHANNEL_KEY_KAKAO
+            PORTONE_CHANNEL_KEY_TOSS
+            PORTONE_CHANNEL_KEY_TOSS_PAYMENTS
+            KAKAO_REST_API_KEY
+            VITE_API_BASE_URL
+            VITE_KAKAO_JS_KEY
+          )
+
+          for key in "${REQUIRED_KEYS[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::GitHub Secrets의 ${key} 값이 비어 있습니다."
+              exit 1
+            fi
+          done
+
+      - name: 백엔드 런타임 환경파일 생성
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > backend.env <<EOF
+          SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}
+          SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
+          SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+          OAUTH_GOOGLE_CLIENT_ID=${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
+          OAUTH_GOOGLE_CLIENT_SECRET=${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
+          OAUTH_KAKAO_CLIENT_ID=${{ secrets.OAUTH_KAKAO_CLIENT_ID }}
+          OAUTH_KAKAO_CLIENT_SECRET=${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
+          PORTONE_STORE_ID=${{ secrets.PORTONE_STORE_ID }}
+          PORTONE_API_SECRET=${{ secrets.PORTONE_API_SECRET }}
+          PORTONE_CHANNEL_KEY_KAKAO=${{ secrets.PORTONE_CHANNEL_KEY_KAKAO }}
+          PORTONE_CHANNEL_KEY_TOSS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}
+          PORTONE_CHANNEL_KEY_TOSS_PAYMENTS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}
+          KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
+          EOF
+          chmod 600 backend.env
+
+      - name: 프론트엔드 빌드용 환경파일 생성
+        working-directory: hanspoon_frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .env.production <<EOF
+          VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
+          VITE_KAKAO_JS_KEY=${{ secrets.VITE_KAKAO_JS_KEY }}
+          EOF
 
       - name: JDK 21 설정
         uses: actions/setup-java@v4
@@ -22,76 +116,149 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      # ✅ 백엔드 폴더에서 gradle 실행 (중요!)
-      - name: Gradle 실행 권한 부여
-        working-directory: backend
-        run: chmod +x gradlew
+      - name: 백엔드 빌드
+        id: backend_build
+        working-directory: hanspoon_backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew clean bootJar -x test
 
-      - name: 백엔드 빌드(app jar 생성)
-        working-directory: backend
-        run: ./gradlew clean bootJar
+          JAR_PATH="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"
+          if [ -z "${JAR_PATH}" ]; then
+            echo "::error::백엔드 JAR 파일을 찾지 못했습니다."
+            exit 1
+          fi
 
-      - name: 산출물 확인
-        working-directory: backend
-        run: ls -al build/libs
+          echo "jar_path=${JAR_PATH}" >> "${GITHUB_OUTPUT}"
 
-      # ✅ build/libs/*.jar 업로드
-      - name: EC2로 jar 업로드
+      - name: Node.js 20 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: hanspoon_frontend/package-lock.json
+
+      - name: 프론트엔드 빌드
+        working-directory: hanspoon_frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: 배포 번들 생성
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf deploy_bundle deploy_bundle.tar.gz
+          mkdir -p deploy_bundle/backend deploy_bundle/frontend
+
+          cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
+          cp backend.env deploy_bundle/backend/.env
+          cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
+
+          tar -czf deploy_bundle.tar.gz -C deploy_bundle .
+
+      - name: EC2로 배포 번들 업로드
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT }}
-          source: "backend/build/libs/*.jar"
-          target: "/tmp/hanspoon_upload"
+          port: ${{ secrets.EC2_PORT || 22 }}
+          source: deploy_bundle.tar.gz
+          target: /tmp/hanspoon/${{ github.sha }}
           overwrite: true
 
-      - name: EC2에서 app.jar 교체 + 서비스 재시작
-        uses: appleboy/ssh-action@v1.0.3
+      - name: EC2 배포 실행
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_ROOT: ${{ secrets.EC2_APP_ROOT }}
+          SERVICE_NAME: ${{ secrets.EC2_SERVICE_NAME }}
+          HEALTHCHECK_URL: ${{ secrets.EC2_HEALTHCHECK_URL }}
+          HEALTHCHECK_RETRY: ${{ secrets.EC2_HEALTHCHECK_RETRY }}
+          HEALTHCHECK_DELAY: ${{ secrets.EC2_HEALTHCHECK_DELAY }}
+          KEEP_RELEASES: ${{ secrets.EC2_KEEP_RELEASES }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script_stop: true
+          envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
           script: |
-            set -e
+            set -euo pipefail
 
-            echo "0) 업로드 폴더 상태 확인"
-            ls -al /tmp/hanspoon_upload || true
-            find /tmp/hanspoon_upload -maxdepth 5 -type f -name "*.jar" -print || true
+            APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
+            SERVICE_NAME="${SERVICE_NAME:-hanspoon-backend}"
+            KEEP_RELEASES="${KEEP_RELEASES:-5}"
 
-            echo "1) 업로드된 jar 찾기(plain 제외)"
-            JAR_PATH=$(find /tmp/hanspoon_upload -maxdepth 6 -type f -name "*.jar" | grep -v plain | head -n 1)
+            TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
+            BUNDLE_PATH="${TMP_DIR}/deploy_bundle.tar.gz"
+            RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
+            CURRENT_LINK="${APP_ROOT}/current"
 
-            if [ -z "$JAR_PATH" ]; then
-              echo "업로드된 JAR을 찾지 못했어. (plain 제외 조건 때문에 없을 수도 있음)"
+            if [ ! -f "${BUNDLE_PATH}" ]; then
+              BUNDLE_PATH="$(find "${TMP_DIR}" -maxdepth 2 -type f -name 'deploy_bundle.tar.gz' | head -n 1)"
+            fi
+            if [ -z "${BUNDLE_PATH:-}" ] || [ ! -f "${BUNDLE_PATH}" ]; then
+              echo "배포 번들을 찾지 못했습니다: ${TMP_DIR}"
               exit 1
             fi
 
-            echo "선택된 JAR: $JAR_PATH"
+            mkdir -p "${RELEASE_DIR}"
+            tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"
+            chmod 600 "${RELEASE_DIR}/backend/.env"
 
-            echo "2) 릴리즈 백업 폴더 준비"
-            sudo mkdir -p /opt/hanspoon/releases/backend
-            sudo mkdir -p /opt/hanspoon/current/backend
-
-            echo "3) 기존 app.jar 백업(있으면)"
-            if [ -f /opt/hanspoon/current/backend/app.jar ]; then
-              sudo cp /opt/hanspoon/current/backend/app.jar "/opt/hanspoon/releases/backend/app-$(date +%Y%m%d_%H%M%S).jar"
+            if [ ! -f "${RELEASE_DIR}/backend/app.jar" ]; then
+              echo "백엔드 JAR이 누락되었습니다: ${RELEASE_DIR}/backend/app.jar"
+              exit 1
+            fi
+            if [ ! -f "${RELEASE_DIR}/backend/.env" ]; then
+              echo "백엔드 환경파일이 누락되었습니다: ${RELEASE_DIR}/backend/.env"
+              exit 1
+            fi
+            if [ ! -d "${RELEASE_DIR}/frontend" ]; then
+              echo "프론트엔드 산출물이 누락되었습니다: ${RELEASE_DIR}/frontend"
+              exit 1
             fi
 
-            echo "4) 새 jar를 app.jar로 교체"
-            sudo cp "$JAR_PATH" /opt/hanspoon/current/backend/app.jar
+            ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
-            echo "5) 권한 정리"
-            sudo chown ubuntu:ubuntu /opt/hanspoon/current/backend/app.jar
-            sudo chmod 644 /opt/hanspoon/current/backend/app.jar
+            sudo systemctl restart "${SERVICE_NAME}"
+            sudo systemctl is-active --quiet "${SERVICE_NAME}" || {
+              sudo journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
+              exit 1
+            }
 
-            echo "6) 서비스 재시작"
-            sudo systemctl restart hanspoon
+            sudo systemctl reload nginx || sudo systemctl restart nginx
 
-            echo "7) 상태 확인"
-            sudo systemctl status hanspoon --no-pager
+            if [ -n "${HEALTHCHECK_URL:-}" ]; then
+              HEALTHCHECK_RETRY="${HEALTHCHECK_RETRY:-20}"
+              HEALTHCHECK_DELAY="${HEALTHCHECK_DELAY:-3}"
+              HEALTH_OK="0"
 
-            echo "8) 헬스체크"
-            curl -sS http://127.0.0.1:8080/actuator/health || true
+              for i in $(seq 1 "${HEALTHCHECK_RETRY}"); do
+                if curl -fsS "${HEALTHCHECK_URL}" > /dev/null; then
+                  HEALTH_OK="1"
+                  break
+                fi
+                sleep "${HEALTHCHECK_DELAY}"
+              done
+
+              if [ "${HEALTH_OK}" != "1" ]; then
+                echo "헬스체크에 실패했습니다: ${HEALTHCHECK_URL}"
+                sudo journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
+                exit 1
+              fi
+            fi
+
+            if [ "${KEEP_RELEASES}" -gt 0 ]; then
+              PRUNE_START=$((KEEP_RELEASES + 1))
+              ls -1dt "${APP_ROOT}"/releases/* 2>/dev/null | tail -n +"${PRUNE_START}" | xargs -r rm -rf --
+            fi
+
+            rm -rf "${TMP_DIR}" || true
