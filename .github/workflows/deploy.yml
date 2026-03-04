@@ -197,7 +197,6 @@ jobs:
           script: |
             bash -se <<'BASH_SCRIPT'
             set -eu
-            trap 'echo "[배포] 실패 라인: ${LINENO}"' ERR
 
             echo "[배포] 스크립트 시작"
             echo "[배포] 사용자: $(whoami)"
@@ -251,10 +250,25 @@ jobs:
               exit 1
             fi
             echo "[배포] 번들 최종 경로: ${BUNDLE_PATH}"
+            ${SUDO} ls -l "${BUNDLE_PATH}" || true
 
             # /opt 아래는 일반 사용자 권한으로 쓰기 실패하는 경우가 많아 sudo로 처리합니다.
-            ${SUDO} mkdir -p "${RELEASE_DIR}"
-            ${SUDO} tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"
+            echo "[배포] 릴리즈 디렉토리 생성: ${RELEASE_DIR}"
+            if ! ${SUDO} mkdir -p "${RELEASE_DIR}"; then
+              echo "릴리즈 디렉토리 생성 실패: ${RELEASE_DIR}"
+              ${SUDO} ls -ld "${APP_ROOT}" "${APP_ROOT}/releases" || true
+              ${SUDO} df -h || true
+              exit 1
+            fi
+
+            echo "[배포] 번들 압축 해제"
+            if ! ${SUDO} tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"; then
+              echo "번들 압축 해제 실패: ${BUNDLE_PATH}"
+              ${SUDO} ls -ld "${RELEASE_DIR}" || true
+              ${SUDO} df -h || true
+              ${SUDO} tar -tzf "${BUNDLE_PATH}" | head -n 20 || true
+              exit 1
+            fi
 
             if ! ${SUDO} test -f "${RELEASE_DIR}/backend/app.jar"; then
               echo "백엔드 JAR이 누락되었습니다: ${RELEASE_DIR}/backend/app.jar"
