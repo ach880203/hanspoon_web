@@ -2,8 +2,8 @@ name: Backend Deploy (app.jar)
 
 on:
   push:
-    branches: [ "main" ]   # main에 머지되면 자동 배포
-  workflow_dispatch: {}     # 수동 실행 버튼도 제공
+    branches: ["main"]     # main에 머지되면 자동 배포
+  workflow_dispatch: {}     # 수동 실행 버튼
 
 jobs:
   build-and-deploy:
@@ -12,32 +12,38 @@ jobs:
     steps:
       - name: 체크아웃
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: JDK 21 설정
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
           cache: gradle
 
+      # ✅ 백엔드 폴더에서 gradle 실행 (중요!)
       - name: Gradle 실행 권한 부여
+        working-directory: backend
         run: chmod +x gradlew
 
       - name: 백엔드 빌드(app jar 생성)
+        working-directory: backend
         run: ./gradlew clean bootJar
 
       - name: 산출물 확인
+        working-directory: backend
         run: ls -al build/libs
 
-      # build/libs/*.jar 중 "plain" 아닌 bootJar를 골라서 app.jar로 업로드
-      - name: EC2로 app.jar 업로드
+      # ✅ build/libs/*.jar 업로드
+      - name: EC2로 jar 업로드
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT }}
-          source: "build/libs/*.jar"
+          source: "backend/build/libs/*.jar"
           target: "/tmp/hanspoon_upload"
           overwrite: true
 
@@ -51,12 +57,23 @@ jobs:
           script: |
             set -e
 
+            echo "0) 업로드 폴더 상태 확인"
+            ls -al /tmp/hanspoon_upload || true
+            find /tmp/hanspoon_upload -maxdepth 5 -type f -name "*.jar" -print || true
+
             echo "1) 업로드된 jar 찾기(plain 제외)"
-            JAR_PATH=$(ls -1 /tmp/hanspoon_upload/build/libs/*.jar | grep -v plain | head -n 1)
+            JAR_PATH=$(find /tmp/hanspoon_upload -maxdepth 6 -type f -name "*.jar" | grep -v plain | head -n 1)
+
+            if [ -z "$JAR_PATH" ]; then
+              echo "업로드된 JAR을 찾지 못했어. (plain 제외 조건 때문에 없을 수도 있음)"
+              exit 1
+            fi
+
             echo "선택된 JAR: $JAR_PATH"
 
             echo "2) 릴리즈 백업 폴더 준비"
             sudo mkdir -p /opt/hanspoon/releases/backend
+            sudo mkdir -p /opt/hanspoon/current/backend
 
             echo "3) 기존 app.jar 백업(있으면)"
             if [ -f /opt/hanspoon/current/backend/app.jar ]; then
@@ -77,4 +94,4 @@ jobs:
             sudo systemctl status hanspoon --no-pager
 
             echo "8) 헬스체크"
-            curl -sS http://127.0.0.1:8080/actuator/health
+            curl -sS http://127.0.0.1:8080/actuator/health || true
