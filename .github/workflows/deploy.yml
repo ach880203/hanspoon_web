@@ -153,7 +153,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          rm -rf deploy_bundle deploy_bundle.tar.gz
+          rm -rf deploy_bundle
           mkdir -p deploy_bundle/backend deploy_bundle/frontend
 
           cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
@@ -165,8 +165,6 @@ jobs:
             echo "::warning::저장소 루트에 deploy.md가 없어 배포 번들에 포함하지 않습니다."
           fi
 
-          tar -czf deploy_bundle.tar.gz -C deploy_bundle .
-
       - name: EC2로 배포 번들 업로드
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -174,7 +172,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
-          source: deploy_bundle.tar.gz
+          source: deploy_bundle
           target: /tmp/hanspoon/${{ github.sha }}
           overwrite: true
 
@@ -192,6 +190,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
+          command_timeout: 30m
           script_stop: true
           envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
           script: |
@@ -237,23 +236,25 @@ jobs:
             fi
 
             TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
-            BUNDLE_PATH="${TMP_DIR}/deploy_bundle.tar.gz"
+            PAYLOAD_DIR="${TMP_DIR}/deploy_bundle"
             RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
             CURRENT_LINK="${APP_ROOT}/current"
 
-            echo "[배포] 번들 경로 확인: ${BUNDLE_PATH}"
-            if [ ! -f "${BUNDLE_PATH}" ]; then
-              BUNDLE_PATH="$(find "${TMP_DIR}" -maxdepth 2 -type f -name 'deploy_bundle.tar.gz' -print -quit || true)"
+            echo "[배포] 번들 경로 확인: ${PAYLOAD_DIR}"
+            if [ ! -d "${PAYLOAD_DIR}" ]; then
+              PAYLOAD_DIR="$(find "${TMP_DIR}" -maxdepth 3 -type d -name 'deploy_bundle' -print -quit || true)"
             fi
-            if [ -z "${BUNDLE_PATH:-}" ] || [ ! -f "${BUNDLE_PATH}" ]; then
+            if [ -z "${PAYLOAD_DIR:-}" ] || [ ! -d "${PAYLOAD_DIR}" ]; then
               echo "배포 번들을 찾지 못했습니다: ${TMP_DIR}"
+              ls -al "${TMP_DIR}" || true
               exit 1
             fi
-            echo "[배포] 번들 최종 경로: ${BUNDLE_PATH}"
-            ${SUDO} ls -l "${BUNDLE_PATH}" || true
+            echo "[배포] 번들 최종 경로: ${PAYLOAD_DIR}"
+            ls -al "${PAYLOAD_DIR}" || true
 
             # /opt 아래는 일반 사용자 권한으로 쓰기 실패하는 경우가 많아 sudo로 처리합니다.
             echo "[배포] 릴리즈 디렉토리 생성: ${RELEASE_DIR}"
+            ${SUDO} rm -rf "${RELEASE_DIR}" || true
             if ! ${SUDO} mkdir -p "${RELEASE_DIR}"; then
               echo "릴리즈 디렉토리 생성 실패: ${RELEASE_DIR}"
               ${SUDO} ls -ld "${APP_ROOT}" "${APP_ROOT}/releases" || true
@@ -261,12 +262,11 @@ jobs:
               exit 1
             fi
 
-            echo "[배포] 번들 압축 해제"
-            if ! ${SUDO} tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"; then
-              echo "번들 압축 해제 실패: ${BUNDLE_PATH}"
+            echo "[배포] 번들 복사"
+            if ! ${SUDO} cp -a "${PAYLOAD_DIR}/." "${RELEASE_DIR}/"; then
+              echo "번들 복사 실패: ${PAYLOAD_DIR} -> ${RELEASE_DIR}"
               ${SUDO} ls -ld "${RELEASE_DIR}" || true
               ${SUDO} df -h || true
-              ${SUDO} tar -tzf "${BUNDLE_PATH}" | head -n 20 || true
               exit 1
             fi
 
