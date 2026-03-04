@@ -79,7 +79,7 @@ export default function App() {
         <Route path="cart" element={<CartPage />} />
         <Route path="orders" element={<MyOrdersPage />} />
 
-        <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+        <Route path="orders/:orderId" element={<OrderDetailPage />} />
 
         <Route path="admin" element={
           <ProtectedRoute requiredRole="ROLE_ADMIN">
