@@ -1,0 +1,164 @@
+/* src/pages/Home.css */
+.home-container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.home-hero {
+    background: white;
+    border-radius: 32px;
+    padding: 60px 40px;
+    margin-bottom: 40px;
+    border: 1px solid var(--border-light);
+    background-image: linear-gradient(135deg, #fff 0%, #fff1e9 100%);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    position: relative;
+}
+
+.home-hero::after {
+    content: '🥗';
+    position: absolute;
+    right: -20px;
+    bottom: -20px;
+    font-size: 120px;
+    opacity: 0.1;
+    transform: rotate(-15deg);
+}
+
+.hero-text h1 {
+    font-size: 48px;
+    margin-bottom: 16px;
+    color: var(--text-main);
+}
+
+.hero-text p {
+    font-size: 18px;
+    color: var(--text-muted);
+    max-width: 500px;
+    line-height: 1.6;
+}
+
+/* 서비스 섹션 */
+.home-content-sections {
+    padding: 80px 0;
+}
+
+.service-intro {
+    margin-bottom: 60px;
+}
+
+.section-header {
+    text-align: center;
+    margin-bottom: 48px;
+}
+
+.section-header h2 {
+    font-size: 36px;
+    font-weight: 800;
+    color: var(--text-main);
+    margin-bottom: 12px;
+}
+
+.section-header p {
+    font-size: 18px;
+    color: var(--text-muted);
+}
+
+.service-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 32px;
+}
+
+.use-case-card {
+    background: white;
+    border-radius: 24px;
+    padding: 32px;
+    border: 1px solid var(--border-light);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+}
+
+.use-case-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+    border-color: var(--primary);
+}
+
+.card-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 24px;
+    font-weight: 800;
+    margin-bottom: 20px;
+    color: var(--text-main);
+}
+
+.use-case-card p {
+    font-size: 15px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-bottom: 24px;
+    flex-grow: 1;
+}
+
+.card-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.pill-link {
+    background: var(--bg-main);
+    color: var(--text-main) !important;
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    border: 1px solid var(--border-light);
+    transition: all 0.2s ease;
+}
+
+.pill-link:hover {
+    background: var(--primary);
+    color: white !important;
+    border-color: var(--primary);
+    transform: scale(1.05);
+}
+
+.sublinks-section {
+    padding-top: 20px;
+    border-top: 1px dashed var(--border-light);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.sublink {
+    color: var(--text-muted) !important;
+    font-size: 14px;
+    font-weight: 600;
+    transition: color 0.2s ease;
+}
+
+.sublink:hover {
+    color: var(--primary) !important;
+    text-decoration: none;
+}
+
+@media (max-width: 768px) {
+    .section-header h2 {
+        font-size: 28px;
+    }
+
+    .service-grid {
+        grid-template-columns: 1fr;
+    }
+}
