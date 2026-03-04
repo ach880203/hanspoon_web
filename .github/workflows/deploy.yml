@@ -159,6 +159,11 @@ jobs:
           cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
           cp backend.env deploy_bundle/backend/.env
           cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
+          if [ -f deploy.md ]; then
+            cp deploy.md deploy_bundle/deploy.md
+          else
+            echo "::warning::저장소 루트에 deploy.md가 없어 배포 번들에 포함하지 않습니다."
+          fi
 
           tar -czf deploy_bundle.tar.gz -C deploy_bundle .
 
@@ -224,6 +229,11 @@ jobs:
             if [ ! -d "${RELEASE_DIR}/frontend" ]; then
               echo "프론트엔드 산출물이 누락되었습니다: ${RELEASE_DIR}/frontend"
               exit 1
+            fi
+            if [ -f "${RELEASE_DIR}/deploy.md" ]; then
+              echo "배포 문서 확인: ${RELEASE_DIR}/deploy.md"
+            else
+              echo "배포 문서 없음: ${RELEASE_DIR}/deploy.md"
             fi
 
             ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
