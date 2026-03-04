@@ -85,12 +85,17 @@ jobs:
             RELEASE_DIR="/opt/hanspoon/releases/${{ github.sha }}"
             CURRENT_LINK="/opt/hanspoon/current"
 
+            echo "=== RELEASE_DIR tree==="
+            find "$RELEASE_DIR" -maxdepth 4 -type f | sed -n '1,200p'
+
             # --- backend: jar 파일명을 app.jar로 통일 ---
-            JAR_PATH=$(find "$RELEASE_DIR/backend" -maxdepth 2 -name "*.jar" | head -n 1)
+            JAR_PATH=$(find "$RELEASE_DIR" -name "*.jar" | head -n 1)
             if [ -z "$JAR_PATH" ]; then
               echo " JAR not found in $RELEASE_DIR/backend"
               exit 1
             fi
+
+            mkdir -p "$RELEASE_DIR/backend"
             cp "$JAR_PATH" "$RELEASE_DIR/backend/app.jar"
 
             # --- current 링크 교체 ---
