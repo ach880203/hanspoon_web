@@ -219,11 +219,11 @@ jobs:
 
           # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 IP
           FALLBACK_HOST="3.36.180.241"
-          FALLBACK_PORT="443"
+          FALLBACK_PORT="22"
 
           HOST="${EC2_HOST}"
-          # GitHub Hosted Runner에서 22 경로 타임아웃이 반복되어 배포 포트를 443으로 고정합니다.
-          PORT="443"
+          # EC2_PORT 시크릿이 있으면 우선 사용하고, 없으면 22를 우선 후보로 사용합니다.
+          PORT="${EC2_PORT:-22}"
 
           if [ -n "${PORT}" ] && ! [[ "${PORT}" =~ ^[0-9]+$ ]]; then
             echo "::warning::EC2_PORT(${PORT})가 숫자가 아니어서 22로 대체합니다."
@@ -262,12 +262,41 @@ jobs:
             FINAL_HOST="${FIRST_PUBLIC_IP}"
           fi
 
-          # 시크릿의 HOST/PORT가 실제로 닿지 않으면, 공인 IP:22로 자동 폴백합니다.
-          if ! timeout 6 bash -c "cat < /dev/null > /dev/tcp/${FINAL_HOST}/${PORT}" 2>/dev/null; then
-            echo "::warning::시크릿 배포 대상(${FINAL_HOST}:${PORT}) 연결 실패. 폴백(${FALLBACK_HOST}:${FALLBACK_PORT})로 전환합니다."
-            FINAL_HOST="${FALLBACK_HOST}"
-            PORT="${FALLBACK_PORT}"
+          # SSH 포트 자동 탐색: 시크릿 포트 -> 22 -> 443 순서로 확인합니다.
+          CANDIDATE_PORTS=("${PORT}" "22" "443")
+          SELECTED_PORT=""
+          for CANDIDATE_PORT in "${CANDIDATE_PORTS[@]}"; do
+            if ! [[ "${CANDIDATE_PORT}" =~ ^[0-9]+$ ]]; then
+              continue
+            fi
+            if timeout 6 bash -c "cat < /dev/null > /dev/tcp/${FINAL_HOST}/${CANDIDATE_PORT}" 2>/dev/null; then
+              SELECTED_PORT="${CANDIDATE_PORT}"
+              break
+            fi
+          done
+
+          # 현재 호스트에서 모두 실패하면 폴백 호스트에서도 한 번 더 시도합니다.
+          if [ -z "${SELECTED_PORT}" ]; then
+            if [ "${FINAL_HOST}" != "${FALLBACK_HOST}" ]; then
+              echo "::warning::${FINAL_HOST}에서 SSH 포트 탐색 실패. 폴백 호스트(${FALLBACK_HOST})로 재시도합니다."
+              FINAL_HOST="${FALLBACK_HOST}"
+              for CANDIDATE_PORT in "${CANDIDATE_PORTS[@]}"; do
+                if ! [[ "${CANDIDATE_PORT}" =~ ^[0-9]+$ ]]; then
+                  continue
+                fi
+                if timeout 6 bash -c "cat < /dev/null > /dev/tcp/${FINAL_HOST}/${CANDIDATE_PORT}" 2>/dev/null; then
+                  SELECTED_PORT="${CANDIDATE_PORT}"
+                  break
+                fi
+              done
+            fi
           fi
+
+          if [ -z "${SELECTED_PORT}" ]; then
+            echo "::error::배포 대상 SSH 포트를 찾지 못했습니다. 시도 포트: ${CANDIDATE_PORTS[*]}"
+            exit 1
+          fi
+          PORT="${SELECTED_PORT}"
 
           echo "host=${FINAL_HOST}" >> "${GITHUB_OUTPUT}"
           echo "port=${PORT}" >> "${GITHUB_OUTPUT}"
