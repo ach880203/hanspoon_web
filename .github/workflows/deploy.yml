@@ -3,7 +3,7 @@ name: AWS 배포
 on:
   push:
     branches: ["main"]
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 concurrency:
   group: aws-deploy-main
@@ -20,27 +20,36 @@ jobs:
       - name: 저장소 체크아웃
         uses: actions/checkout@v4
 
+      # ----------------------------
+      # 1) 시크릿 필수값 검사
+      # ----------------------------
       - name: 배포/앱 시크릿 검사
         shell: bash
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+
           SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
           SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
           SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+
           OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
           OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
           OAUTH_KAKAO_CLIENT_ID: ${{ secrets.OAUTH_KAKAO_CLIENT_ID }}
           OAUTH_KAKAO_CLIENT_SECRET: ${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}
+
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRATION: ${{ secrets.JWT_EXPIRATION }}
+
           PORTONE_STORE_ID: ${{ secrets.PORTONE_STORE_ID }}
           PORTONE_API_SECRET: ${{ secrets.PORTONE_API_SECRET }}
           PORTONE_CHANNEL_KEY_KAKAO: ${{ secrets.PORTONE_CHANNEL_KEY_KAKAO }}
           PORTONE_CHANNEL_KEY_TOSS: ${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}
           PORTONE_CHANNEL_KEY_TOSS_PAYMENTS: ${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}
+
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
           VITE_KAKAO_JS_KEY: ${{ secrets.VITE_KAKAO_JS_KEY }}
         run: |
@@ -76,39 +85,49 @@ jobs:
             fi
           done
 
-      - name: 백엔드 런타임 환경파일 생성
+      # ----------------------------
+      # 2) 런타임/빌드 환경파일 생성
+      #   - 백엔드는 런타임용 env(서버에서 systemd가 읽는 값)
+      #   - 프런트는 빌드 시점 env(Vite)
+      # ----------------------------
+      - name: 백엔드 런타임 환경파일 생성(번들 포함용)
         shell: bash
         run: |
           set -euo pipefail
-          cat > backend.env <<EOF
-          SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}
-          SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
-          SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
-          OAUTH_GOOGLE_CLIENT_ID=${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
-          OAUTH_GOOGLE_CLIENT_SECRET=${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
-          OAUTH_KAKAO_CLIENT_ID=${{ secrets.OAUTH_KAKAO_CLIENT_ID }}
-          OAUTH_KAKAO_CLIENT_SECRET=${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
-          PORTONE_STORE_ID=${{ secrets.PORTONE_STORE_ID }}
-          PORTONE_API_SECRET=${{ secrets.PORTONE_API_SECRET }}
-          PORTONE_CHANNEL_KEY_KAKAO=${{ secrets.PORTONE_CHANNEL_KEY_KAKAO }}
-          PORTONE_CHANNEL_KEY_TOSS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}
-          PORTONE_CHANNEL_KEY_TOSS_PAYMENTS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}
-          KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
-          EOF
-          chmod 600 backend.env
 
-      - name: 프론트엔드 빌드용 환경파일 생성
+          {
+            echo "SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}"
+            echo "SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}"
+            echo "SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}"
+            echo "OAUTH_GOOGLE_CLIENT_ID=${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}"
+            echo "OAUTH_GOOGLE_CLIENT_SECRET=${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}"
+            echo "OAUTH_KAKAO_CLIENT_ID=${{ secrets.OAUTH_KAKAO_CLIENT_ID }}"
+            echo "OAUTH_KAKAO_CLIENT_SECRET=${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}"
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
+            echo "JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}"
+            echo "PORTONE_STORE_ID=${{ secrets.PORTONE_STORE_ID }}"
+            echo "PORTONE_API_SECRET=${{ secrets.PORTONE_API_SECRET }}"
+            echo "PORTONE_CHANNEL_KEY_KAKAO=${{ secrets.PORTONE_CHANNEL_KEY_KAKAO }}"
+            echo "PORTONE_CHANNEL_KEY_TOSS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}"
+            echo "PORTONE_CHANNEL_KEY_TOSS_PAYMENTS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}"
+            echo "KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}"
+          } > hanspoon_backend/backend.env
+          chmod 600 hanspoon_backend/backend.env
+
+      - name: 프런트엔드 빌드용 환경파일 생성(Vite)
         working-directory: hanspoon_frontend
         shell: bash
         run: |
           set -euo pipefail
-          cat > .env.production <<EOF
-          VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
-          VITE_KAKAO_JS_KEY=${{ secrets.VITE_KAKAO_JS_KEY }}
-          EOF
 
+          {
+            echo "VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}"
+            echo "VITE_KAKAO_JS_KEY=${{ secrets.VITE_KAKAO_JS_KEY }}"
+          } > .env.production
+
+      # ----------------------------
+      # 3) 백엔드 빌드(Gradle)
+      # ----------------------------
       - name: JDK 21 설정
         uses: actions/setup-java@v4
         with:
@@ -116,7 +135,7 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: 백엔드 빌드
+      - name: 백엔드 빌드(bootJar)
         id: backend_build
         working-directory: hanspoon_backend
         shell: bash
@@ -128,11 +147,15 @@ jobs:
           JAR_PATH="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"
           if [ -z "${JAR_PATH}" ]; then
             echo "::error::백엔드 JAR 파일을 찾지 못했습니다."
+            ls -al build/libs || true
             exit 1
           fi
 
           echo "jar_path=${JAR_PATH}" >> "${GITHUB_OUTPUT}"
 
+      # ----------------------------
+      # 4) 프런트 빌드(Vite)
+      # ----------------------------
       - name: Node.js 20 설정
         uses: actions/setup-node@v4
         with:
@@ -140,7 +163,7 @@ jobs:
           cache: npm
           cache-dependency-path: hanspoon_frontend/package-lock.json
 
-      - name: 프론트엔드 빌드
+      - name: 프런트엔드 빌드
         working-directory: hanspoon_frontend
         shell: bash
         run: |
@@ -148,6 +171,12 @@ jobs:
           npm ci
           npm run build
 
+      # ----------------------------
+      # 5) 배포 번들 생성(서버로 올릴 것만 묶기)
+      #   - backend/app.jar
+      #   - backend/.env (런타임)
+      #   - frontend/dist (정적)
+      # ----------------------------
       - name: 배포 번들 생성
         shell: bash
         run: |
@@ -157,16 +186,46 @@ jobs:
           mkdir -p deploy_bundle/backend deploy_bundle/frontend
 
           cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
-          cp backend.env deploy_bundle/backend/.env
-          # scp-action 컨테이너가 번들링할 수 있도록 읽기 권한을 잠시 부여합니다.
-          chmod 644 deploy_bundle/backend/.env
+
+          cp "hanspoon_backend/backend.env" "deploy_bundle/backend/.env"
+          chmod 644 "deploy_bundle/backend/.env" # scp-action이 읽을 수 있게(서버에서 600으로 다시 잠금)
+
           cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
+
           if [ -f deploy.md ]; then
             cp deploy.md deploy_bundle/deploy.md
           else
             echo "::warning::저장소 루트에 deploy.md가 없어 배포 번들에 포함하지 않습니다."
           fi
 
+      # ----------------------------
+      # 6) 업로드 전 SSH 포트 연결 점검
+      #   - 네트워크 차단(SG/NACL/라우팅/사설IP) 시 여기서 빠르게 실패시킴
+      # ----------------------------
+      - name: EC2 SSH 연결 사전 점검
+        shell: bash
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_PORT: ${{ secrets.EC2_PORT }}
+        run: |
+          set -euo pipefail
+
+          HOST="${EC2_HOST}"
+          PORT="${EC2_PORT:-22}"
+
+          echo "[점검] 대상: ${HOST}:${PORT}"
+
+          if ! timeout 8 bash -c "cat < /dev/null > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
+            echo "::error::GitHub Runner에서 ${HOST}:${PORT} TCP 접속에 실패했습니다(i/o timeout 가능)."
+            echo "::error::보안 그룹 인바운드(SSH), NACL, 라우팅(IGW), EC2 공인 IP/탄력 IP, 사설 서브넷 여부를 확인하세요."
+            exit 1
+          fi
+
+          echo "[점검] SSH 포트 연결 가능"
+
+      # ----------------------------
+      # 7) EC2로 업로드(SCP)
+      # ----------------------------
       - name: EC2로 배포 번들 업로드
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -177,7 +236,15 @@ jobs:
           source: deploy_bundle
           target: /tmp/hanspoon/${{ github.sha }}
           overwrite: true
+          timeout: 2m
 
+      # ----------------------------
+      # 8) EC2에서 배포 실행(릴리즈 + current 링크 + 서비스 재시작)
+      #   - Terraform userdata 기준 경로:
+      #     /opt/hanspoon/current/backend/app.jar
+      #     /opt/hanspoon/current/frontend/ (nginx root)
+      #     /opt/hanspoon/env/backend.env (systemd EnvironmentFile)
+      # ----------------------------
       - name: EC2 배포 실행
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -197,22 +264,16 @@ jobs:
           envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
           script: |
             bash -se <<'BASH_SCRIPT'
-            set -eu
+            set -euo pipefail
 
-            echo "[배포] 스크립트 시작"
+            echo "[배포] 시작"
             echo "[배포] 사용자: $(whoami)"
 
-            if ! command -v systemctl >/dev/null 2>&1; then
-              echo "systemctl 명령이 없어 배포를 중단합니다."
-              exit 1
-            fi
-
             APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
-            SERVICE_NAME="${SERVICE_NAME:-}"
             KEEP_RELEASES="${KEEP_RELEASES:-5}"
 
             if ! [[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]]; then
-              echo "KEEP_RELEASES 값이 숫자가 아니어서 기본값 5를 사용합니다."
+              echo "[경고] KEEP_RELEASES 값이 숫자가 아니어서 기본값 5를 사용합니다."
               KEEP_RELEASES="5"
             fi
 
@@ -220,13 +281,14 @@ jobs:
             if [ "$(id -u)" -eq 0 ]; then
               SUDO=""
             elif ! sudo -n true >/dev/null 2>&1; then
-              echo "현재 계정은 비밀번호 없는 sudo 권한이 없어 배포를 중단합니다."
+              echo "[오류] 현재 계정은 비밀번호 없는 sudo 권한이 없어 배포를 중단합니다."
               exit 1
             fi
 
-            # 서비스 이름을 비워둔 경우 자동 탐색합니다.
+            # 서비스 이름 자동 탐색(없으면 hanspoon-backend 기본)
+            SERVICE_NAME="${SERVICE_NAME:-}"
             if [ -z "${SERVICE_NAME}" ]; then
-              for CANDIDATE in hanspoon-backend hanspoon; do
+              for CANDIDATE in hanspoon-backend hanspoon-backend.service hanspoon; do
                 if ${SUDO} systemctl status "${CANDIDATE}" >/dev/null 2>&1; then
                   SERVICE_NAME="${CANDIDATE}"
                   break
@@ -239,129 +301,86 @@ jobs:
 
             TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
             PAYLOAD_DIR="${TMP_DIR}/deploy_bundle"
-            RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
-            CURRENT_LINK="${APP_ROOT}/current"
 
-            echo "[배포] 번들 경로 확인: ${PAYLOAD_DIR}"
+            # scp-action 업로드 구조가 달라질 때를 대비한 보정
             if [ ! -d "${PAYLOAD_DIR}" ]; then
-              PAYLOAD_DIR="$(find "${TMP_DIR}" -maxdepth 3 -type d -name 'deploy_bundle' -print -quit || true)"
+              PAYLOAD_DIR="$(find "${TMP_DIR}" -maxdepth 4 -type d -name 'deploy_bundle' -print -quit || true)"
             fi
             if [ -z "${PAYLOAD_DIR:-}" ] || [ ! -d "${PAYLOAD_DIR}" ]; then
-              echo "배포 번들을 찾지 못했습니다: ${TMP_DIR}"
+              echo "[오류] 배포 번들을 찾지 못했습니다: ${TMP_DIR}"
               ls -al "${TMP_DIR}" || true
               exit 1
             fi
-            echo "[배포] 번들 최종 경로: ${PAYLOAD_DIR}"
-            ls -al "${PAYLOAD_DIR}" || true
 
-            # /opt 아래는 일반 사용자 권한으로 쓰기 실패하는 경우가 많아 sudo로 처리합니다.
-            echo "[배포] 릴리즈 디렉토리 생성: ${RELEASE_DIR}"
+            RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
+            CURRENT_LINK="${APP_ROOT}/current"
+
+            echo "[배포] 릴리즈 경로: ${RELEASE_DIR}"
             ${SUDO} rm -rf "${RELEASE_DIR}" || true
-            if ! ${SUDO} mkdir -p "${RELEASE_DIR}"; then
-              echo "릴리즈 디렉토리 생성 실패: ${RELEASE_DIR}"
-              ${SUDO} ls -ld "${APP_ROOT}" "${APP_ROOT}/releases" || true
-              ${SUDO} df -h || true
-              exit 1
-            fi
+            ${SUDO} mkdir -p "${RELEASE_DIR}/backend" "${RELEASE_DIR}/frontend"
 
-            echo "[배포] 번들 복사(파일 단위)"
-            if ! ${SUDO} mkdir -p "${RELEASE_DIR}/backend" "${RELEASE_DIR}/frontend"; then
-              echo "하위 디렉토리 생성 실패: ${RELEASE_DIR}"
-              ${SUDO} ls -ld "${RELEASE_DIR}" || true
-              ${SUDO} df -h || true
-              exit 1
-            fi
+            echo "[배포] 파일 복사"
+            ${SUDO} cp "${PAYLOAD_DIR}/backend/app.jar" "${RELEASE_DIR}/backend/app.jar"
+            ${SUDO} cp "${PAYLOAD_DIR}/backend/.env" "${RELEASE_DIR}/backend/.env"
+            ${SUDO} cp -r "${PAYLOAD_DIR}/frontend/." "${RELEASE_DIR}/frontend/"
 
-            if ! ${SUDO} cp "${PAYLOAD_DIR}/backend/app.jar" "${RELEASE_DIR}/backend/app.jar"; then
-              echo "app.jar 복사 실패"
-              ${SUDO} ls -l "${PAYLOAD_DIR}/backend" || true
-              exit 1
-            fi
-            if ! ${SUDO} cp "${PAYLOAD_DIR}/backend/.env" "${RELEASE_DIR}/backend/.env"; then
-              echo ".env 복사 실패"
-              ${SUDO} ls -la "${PAYLOAD_DIR}/backend" || true
-              exit 1
-            fi
-            if ! ${SUDO} cp -r "${PAYLOAD_DIR}/frontend/." "${RELEASE_DIR}/frontend/"; then
-              echo "frontend 복사 실패"
-              ${SUDO} ls -la "${PAYLOAD_DIR}/frontend" || true
-              ${SUDO} df -h || true
-              exit 1
-            fi
-            echo "[배포] 번들 복사 완료"
+            # (핵심) systemd가 읽는 위치로 env 반영
+            ${SUDO} mkdir -p "${APP_ROOT}/env"
+            ${SUDO} cp "${RELEASE_DIR}/backend/.env" "${APP_ROOT}/env/backend.env"
+            ${SUDO} chmod 600 "${APP_ROOT}/env/backend.env" || true
+
+            # 릴리즈 내부 env도 잠금
+            ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env" || true
+
             if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
-              if ! ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"; then
-                echo "경고: deploy.md 복사에 실패했습니다."
-              fi
-            fi
-
-            echo "[배포] 복사 결과 점검"
-            ${SUDO} test -f "${RELEASE_DIR}/backend/app.jar" || echo "경고: app.jar 확인 실패"
-            ${SUDO} test -f "${RELEASE_DIR}/backend/.env" || echo "경고: .env 확인 실패"
-            ${SUDO} test -d "${RELEASE_DIR}/frontend" || echo "경고: frontend 디렉토리 확인 실패"
-            # 환경에 따라 chmod sudo 권한이 제한될 수 있어 실패 시 경고만 남깁니다.
-            if ! ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env"; then
-              echo "경고: .env 권한(600) 변경에 실패했습니다. 현재 권한을 확인하세요."
-              ${SUDO} ls -l "${RELEASE_DIR}/backend/.env" || true
-            fi
-
-            if ${SUDO} test -f "${RELEASE_DIR}/deploy.md"; then
-              echo "배포 문서 확인: ${RELEASE_DIR}/deploy.md"
-            else
-              echo "배포 문서 없음: ${RELEASE_DIR}/deploy.md"
+              ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md" || true
             fi
 
             echo "[배포] current 링크 전환"
-            if ! ${SUDO} ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"; then
-              echo "current 링크 전환 실패: ${CURRENT_LINK}"
-              ${SUDO} ls -ld "${APP_ROOT}" "${CURRENT_LINK}" || true
-              exit 1
-            fi
-            echo "[배포] current 링크 전환 완료: ${CURRENT_LINK}"
+            ${SUDO} ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
-            echo "[배포] 서비스명: ${SERVICE_NAME}"
-            if ! ${SUDO} systemctl restart "${SERVICE_NAME}"; then
-              echo "서비스 재시작 실패: ${SERVICE_NAME}"
-              echo "등록된 서비스 예시:"
-              ${SUDO} systemctl list-unit-files | grep -E 'hanspoon|nginx' || true
-              exit 1
-            fi
+            echo "[배포] 서비스 재시작: ${SERVICE_NAME}"
+            ${SUDO} systemctl restart "${SERVICE_NAME}"
             ${SUDO} systemctl is-active --quiet "${SERVICE_NAME}" || {
-              ${SUDO} journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
+              echo "[오류] 서비스가 active가 아닙니다. 로그를 출력합니다."
+              ${SUDO} journalctl -u "${SERVICE_NAME}" -n 160 --no-pager || true
               exit 1
             }
 
+            # nginx 리로드(있으면)
             if ${SUDO} systemctl status nginx >/dev/null 2>&1; then
+              ${SUDO} nginx -t
               ${SUDO} systemctl reload nginx || ${SUDO} systemctl restart nginx
-            else
-              echo "nginx 서비스가 없어 재시작을 건너뜁니다."
             fi
 
+            # 헬스체크(선택)
             if [ -n "${HEALTHCHECK_URL:-}" ]; then
               HEALTHCHECK_RETRY="${HEALTHCHECK_RETRY:-20}"
               HEALTHCHECK_DELAY="${HEALTHCHECK_DELAY:-3}"
-              HEALTH_OK="0"
+              echo "[배포] 헬스체크: ${HEALTHCHECK_URL}"
 
+              OK="0"
               for i in $(seq 1 "${HEALTHCHECK_RETRY}"); do
-                if curl -fsS "${HEALTHCHECK_URL}" > /dev/null; then
-                  HEALTH_OK="1"
+                if curl -fsS "${HEALTHCHECK_URL}" >/dev/null; then
+                  OK="1"
                   break
                 fi
                 sleep "${HEALTHCHECK_DELAY}"
               done
 
-              if [ "${HEALTH_OK}" != "1" ]; then
-                echo "헬스체크에 실패했습니다: ${HEALTHCHECK_URL}"
-                ${SUDO} journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
+              if [ "${OK}" != "1" ]; then
+                echo "[오류] 헬스체크 실패"
+                ${SUDO} journalctl -u "${SERVICE_NAME}" -n 160 --no-pager || true
                 exit 1
               fi
             fi
 
+            # 오래된 릴리즈 정리
             if [ "${KEEP_RELEASES}" -gt 0 ]; then
-              RELEASE_INDEX=0
+              IDX=0
               for REL in $(${SUDO} ls -1dt "${APP_ROOT}"/releases/* 2>/dev/null || true); do
-                RELEASE_INDEX=$((RELEASE_INDEX + 1))
-                if [ "${RELEASE_INDEX}" -le "${KEEP_RELEASES}" ]; then
+                IDX=$((IDX + 1))
+                if [ "${IDX}" -le "${KEEP_RELEASES}" ]; then
                   continue
                 fi
                 ${SUDO} rm -rf -- "${REL}"
