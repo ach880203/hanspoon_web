@@ -60,6 +60,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: hanspoon_backend/build/libs/*.jar
           target: /opt/hanspoon/releases/${{ github.sha }}/backend/
+          strip_components: 3
 
       - name: Copy frontend dist to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -85,22 +86,44 @@ jobs:
             RELEASE_DIR="/opt/hanspoon/releases/${{ github.sha }}"
             CURRENT_LINK="/opt/hanspoon/current"
 
-            echo "=== RELEASE_DIR tree==="
+            echo "=== RELEASE_DIR tree (top) ==="
             find "$RELEASE_DIR" -maxdepth 4 -type f | sed -n '1,200p'
 
-            # --- backend: jar 파일명을 app.jar로 통일 ---
-            JAR_PATH=$(find "$RELEASE_DIR" -name "*.jar" | head -n 1)
+            # -----------------------------
+            # 1) 백엔드 JAR 찾기 (plain.jar 제외)
+            # -----------------------------
+            JAR_PATH=$(find "$RELEASE_DIR/backend" -name "*.jar" ! -name "*-plain.jar" | head -n 1)
+
             if [ -z "$JAR_PATH" ]; then
-              echo " JAR not found in $RELEASE_DIR/backend"
+              echo "❌ 실행 가능한 JAR(*-plain.jar 제외)을 찾지 못했어."
               exit 1
             fi
 
             mkdir -p "$RELEASE_DIR/backend"
             cp "$JAR_PATH" "$RELEASE_DIR/backend/app.jar"
 
-            # --- current 링크 교체 ---
+            # -----------------------------
+            # 2) 프런트 dist 평탄화
+            #    nginx root가 /opt/hanspoon/current/frontend 라는 전제
+            # -----------------------------
+            DIST_DIR="$RELEASE_DIR/frontend/hanspoon_frontend/dist"
+ 
+            if [ -d "$DIST_DIR" ]; then
+              mkdir -p "$RELEASE_DIR/frontend"
+              cp -r "$DIST_DIR/." "$RELEASE_DIR/frontend/"
+            else
+              echo "⚠️ dist 폴더를 못 찾았어: $DIST_DIR"
+            fi
+
+            # -----------------------------
+            # 3) current 링크 교체
+            # -----------------------------
             ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
-            # --- 서비스 재시작 ---
+            # -----------------------------
+            # 4) 재시작
+            # -----------------------------
             sudo systemctl restart hanspoon-backend
             sudo systemctl reload nginx
+
+            echo "✅ Deploy done. app.jar=$RELEASE_DIR/backend/app.jar"
