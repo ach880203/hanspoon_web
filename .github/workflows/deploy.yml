@@ -196,7 +196,7 @@ jobs:
           envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
           script: |
             bash -se <<'BASH_SCRIPT'
-            set -euo pipefail
+            set -eu
 
             echo "[배포] 스크립트 시작"
             echo "[배포] 사용자: $(whoami)"
@@ -209,16 +209,6 @@ jobs:
             APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
             SERVICE_NAME="${SERVICE_NAME:-}"
             KEEP_RELEASES="${KEEP_RELEASES:-5}"
-
-            if [ -z "${SERVICE_NAME}" ]; then
-              if systemctl list-unit-files | grep -q '^hanspoon-backend.service'; then
-                SERVICE_NAME="hanspoon-backend"
-              elif systemctl list-unit-files | grep -q '^hanspoon.service'; then
-                SERVICE_NAME="hanspoon"
-              else
-                SERVICE_NAME="hanspoon-backend"
-              fi
-            fi
 
             if ! [[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]]; then
               echo "KEEP_RELEASES 값이 숫자가 아니어서 기본값 5를 사용합니다."
@@ -233,6 +223,19 @@ jobs:
               exit 1
             fi
 
+            # 서비스 이름을 비워둔 경우 자동 탐색합니다.
+            if [ -z "${SERVICE_NAME}" ]; then
+              for CANDIDATE in hanspoon-backend hanspoon; do
+                if ${SUDO} systemctl status "${CANDIDATE}" >/dev/null 2>&1; then
+                  SERVICE_NAME="${CANDIDATE}"
+                  break
+                fi
+              done
+              if [ -z "${SERVICE_NAME}" ]; then
+                SERVICE_NAME="hanspoon-backend"
+              fi
+            fi
+
             TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
             BUNDLE_PATH="${TMP_DIR}/deploy_bundle.tar.gz"
             RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
@@ -240,7 +243,7 @@ jobs:
 
             echo "[배포] 번들 경로 확인: ${BUNDLE_PATH}"
             if [ ! -f "${BUNDLE_PATH}" ]; then
-              BUNDLE_PATH="$(find "${TMP_DIR}" -maxdepth 2 -type f -name 'deploy_bundle.tar.gz' | head -n 1)"
+              BUNDLE_PATH="$(find "${TMP_DIR}" -maxdepth 2 -type f -name 'deploy_bundle.tar.gz' -print -quit || true)"
             fi
             if [ -z "${BUNDLE_PATH:-}" ] || [ ! -f "${BUNDLE_PATH}" ]; then
               echo "배포 번들을 찾지 못했습니다: ${TMP_DIR}"
@@ -273,20 +276,18 @@ jobs:
             ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
             echo "[배포] 서비스명: ${SERVICE_NAME}"
-            if ! systemctl list-unit-files | grep -q "^${SERVICE_NAME}\\.service"; then
-              echo "배포 대상 서비스(${SERVICE_NAME})를 찾지 못했습니다."
+            if ! ${SUDO} systemctl restart "${SERVICE_NAME}"; then
+              echo "서비스 재시작 실패: ${SERVICE_NAME}"
               echo "등록된 서비스 예시:"
-              systemctl list-unit-files | grep -E 'hanspoon|nginx' || true
+              ${SUDO} systemctl list-unit-files | grep -E 'hanspoon|nginx' || true
               exit 1
             fi
-
-            ${SUDO} systemctl restart "${SERVICE_NAME}"
             ${SUDO} systemctl is-active --quiet "${SERVICE_NAME}" || {
               ${SUDO} journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
               exit 1
             }
 
-            if systemctl list-unit-files | grep -q '^nginx.service'; then
+            if ${SUDO} systemctl status nginx >/dev/null 2>&1; then
               ${SUDO} systemctl reload nginx || ${SUDO} systemctl restart nginx
             else
               echo "nginx 서비스가 없어 재시작을 건너뜁니다."
@@ -313,8 +314,14 @@ jobs:
             fi
 
             if [ "${KEEP_RELEASES}" -gt 0 ]; then
-              PRUNE_START=$((KEEP_RELEASES + 1))
-              ls -1dt "${APP_ROOT}"/releases/* 2>/dev/null | tail -n +"${PRUNE_START}" | xargs -r rm -rf --
+              RELEASE_INDEX=0
+              for REL in $(ls -1dt "${APP_ROOT}"/releases/* 2>/dev/null || true); do
+                RELEASE_INDEX=$((RELEASE_INDEX + 1))
+                if [ "${RELEASE_INDEX}" -le "${KEEP_RELEASES}" ]; then
+                  continue
+                fi
+                rm -rf -- "${REL}"
+              done
             fi
 
             rm -rf "${TMP_DIR}" || true
