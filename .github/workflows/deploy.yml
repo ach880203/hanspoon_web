@@ -198,8 +198,24 @@ jobs:
             set -euo pipefail
 
             APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
-            SERVICE_NAME="${SERVICE_NAME:-hanspoon-backend}"
+            SERVICE_NAME="${SERVICE_NAME:-}"
             KEEP_RELEASES="${KEEP_RELEASES:-5}"
+
+            # 서비스 이름이 환경마다 달라서(예: hanspoon-backend / hanspoon) 자동 탐색합니다.
+            if [ -z "${SERVICE_NAME}" ]; then
+              if systemctl list-unit-files | grep -q '^hanspoon-backend.service'; then
+                SERVICE_NAME="hanspoon-backend"
+              elif systemctl list-unit-files | grep -q '^hanspoon.service'; then
+                SERVICE_NAME="hanspoon"
+              else
+                SERVICE_NAME="hanspoon-backend"
+              fi
+            fi
+
+            if ! [[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]]; then
+              echo "KEEP_RELEASES 값이 숫자가 아니어서 기본값 5를 사용합니다."
+              KEEP_RELEASES="5"
+            fi
 
             TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
             BUNDLE_PATH="${TMP_DIR}/deploy_bundle.tar.gz"
@@ -216,7 +232,6 @@ jobs:
 
             mkdir -p "${RELEASE_DIR}"
             tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"
-            chmod 600 "${RELEASE_DIR}/backend/.env"
 
             if [ ! -f "${RELEASE_DIR}/backend/app.jar" ]; then
               echo "백엔드 JAR이 누락되었습니다: ${RELEASE_DIR}/backend/app.jar"
@@ -230,6 +245,7 @@ jobs:
               echo "프론트엔드 산출물이 누락되었습니다: ${RELEASE_DIR}/frontend"
               exit 1
             fi
+            chmod 600 "${RELEASE_DIR}/backend/.env"
             if [ -f "${RELEASE_DIR}/deploy.md" ]; then
               echo "배포 문서 확인: ${RELEASE_DIR}/deploy.md"
             else
@@ -238,13 +254,24 @@ jobs:
 
             ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
+            if ! systemctl list-unit-files | grep -q "^${SERVICE_NAME}\\.service"; then
+              echo "배포 대상 서비스(${SERVICE_NAME})를 찾지 못했습니다."
+              echo "등록된 서비스 예시:"
+              systemctl list-unit-files | grep -E 'hanspoon|nginx' || true
+              exit 1
+            fi
+
             sudo systemctl restart "${SERVICE_NAME}"
             sudo systemctl is-active --quiet "${SERVICE_NAME}" || {
               sudo journalctl -u "${SERVICE_NAME}" -n 120 --no-pager || true
               exit 1
             }
 
-            sudo systemctl reload nginx || sudo systemctl restart nginx
+            if systemctl list-unit-files | grep -q '^nginx.service'; then
+              sudo systemctl reload nginx || sudo systemctl restart nginx
+            else
+              echo "nginx 서비스가 없어 재시작을 건너뜁니다."
+            fi
 
             if [ -n "${HEALTHCHECK_URL:-}" ]; then
               HEALTHCHECK_RETRY="${HEALTHCHECK_RETRY:-20}"
