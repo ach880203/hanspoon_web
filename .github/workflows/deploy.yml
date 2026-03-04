@@ -219,10 +219,11 @@ jobs:
 
           # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 IP
           FALLBACK_HOST="3.36.180.241"
-          FALLBACK_PORT="22"
+          FALLBACK_PORT="443"
 
           HOST="${EC2_HOST}"
-          PORT="${EC2_PORT:-22}"
+          # GitHub Hosted Runner에서 22 경로 타임아웃이 반복되어 배포 포트를 443으로 고정합니다.
+          PORT="443"
 
           if [ -n "${PORT}" ] && ! [[ "${PORT}" =~ ^[0-9]+$ ]]; then
             echo "::warning::EC2_PORT(${PORT})가 숫자가 아니어서 22로 대체합니다."
