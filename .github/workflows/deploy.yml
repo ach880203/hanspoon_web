@@ -383,6 +383,9 @@ jobs:
               exit 1
             fi
 
+            # 현재 SSH 접속 계정(예: ubuntu) 기준으로 릴리즈 .env 읽기 권한을 맞춥니다.
+            DEPLOY_USER="$(id -un)"
+
             # 서비스 이름 자동 탐색(없으면 hanspoon-backend 기본)
             SERVICE_NAME="${SERVICE_NAME:-}"
             if [ -z "${SERVICE_NAME}" ]; then
@@ -427,7 +430,8 @@ jobs:
             ${SUDO} cp "${RELEASE_DIR}/backend/.env" "${APP_ROOT}/env/backend.env"
             ${SUDO} chmod 600 "${APP_ROOT}/env/backend.env" || true
 
-            # 릴리즈 내부 env도 잠금
+            # 릴리즈 내부 .env는 애플리케이션 실행 계정이 읽을 수 있어야 합니다.
+            ${SUDO} chown "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}/backend/.env" || true
             ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env" || true
 
             if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
@@ -435,7 +439,11 @@ jobs:
             fi
 
             echo "[배포] current 링크 전환"
-            ${SUDO} ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+            # 기존 current가 디렉토리인 경우, ln -sfn은 링크 교체가 아니라 내부에 링크를 생성하므로 먼저 제거합니다.
+            if ${SUDO} test -d "${CURRENT_LINK}" && ! ${SUDO} test -L "${CURRENT_LINK}"; then
+              ${SUDO} rm -rf "${CURRENT_LINK}"
+            fi
+            ${SUDO} ln -sfnT "${RELEASE_DIR}" "${CURRENT_LINK}"
 
             echo "[배포] 서비스 재시작: ${SERVICE_NAME}"
             ${SUDO} systemctl restart "${SERVICE_NAME}"
