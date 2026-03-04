@@ -288,6 +288,7 @@ jobs:
               ${SUDO} df -h || true
               exit 1
             fi
+            echo "[배포] 번들 복사 완료"
             if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
               ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"
             fi
@@ -304,15 +305,20 @@ jobs:
               echo "프론트엔드 산출물이 누락되었습니다: ${RELEASE_DIR}/frontend"
               exit 1
             fi
-            ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env"
+            # 환경에 따라 chmod sudo 권한이 제한될 수 있어 실패 시 경고만 남깁니다.
+            if ! ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env"; then
+              echo "경고: .env 권한(600) 변경에 실패했습니다. 현재 권한을 확인하세요."
+              ${SUDO} ls -l "${RELEASE_DIR}/backend/.env" || true
+            fi
 
-            if [ -f "${RELEASE_DIR}/deploy.md" ]; then
+            if ${SUDO} test -f "${RELEASE_DIR}/deploy.md"; then
               echo "배포 문서 확인: ${RELEASE_DIR}/deploy.md"
             else
               echo "배포 문서 없음: ${RELEASE_DIR}/deploy.md"
             fi
 
             ${SUDO} ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+            echo "[배포] current 링크 전환 완료: ${CURRENT_LINK}"
 
             echo "[배포] 서비스명: ${SERVICE_NAME}"
             if ! ${SUDO} systemctl restart "${SERVICE_NAME}"; then
