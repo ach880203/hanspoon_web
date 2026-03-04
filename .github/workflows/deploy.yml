@@ -158,6 +158,8 @@ jobs:
 
           cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
           cp backend.env deploy_bundle/backend/.env
+          # scp-action 컨테이너가 번들링할 수 있도록 읽기 권한을 잠시 부여합니다.
+          chmod 644 deploy_bundle/backend/.env
           cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
           if [ -f deploy.md ]; then
             cp deploy.md deploy_bundle/deploy.md
