@@ -76,6 +76,7 @@ logging:
     root: info
     org.hibernate.SQL: warn
     org.hibernate.type.descriptor.sql: warn
+    com.project.hanspoon.common.security.jwt: warn
 
 jwt:
   secret: ${JWT_SECRET:mySecretKeyForJwtTokenGenerationMustBe256BitsLong}
