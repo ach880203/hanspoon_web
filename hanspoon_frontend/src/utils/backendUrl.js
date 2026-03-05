@@ -8,14 +8,35 @@ export function getBackendBaseUrl(fallback = "") {
   return raw.replace(/\/+$/, "");
 }
 
+function isAbsoluteUrl(path) {
+  return /^(?:https?:)?\/\//i.test(path) || /^data:/i.test(path) || /^blob:/i.test(path);
+}
+
+function normalizePath(path) {
+  const trimmed = String(path || "").trim();
+  if (!trimmed) return "";
+  if (isAbsoluteUrl(trimmed)) return trimmed;
+
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (withLeadingSlash.startsWith("/images/recipe/")) {
+    return withLeadingSlash.replace("/images/recipe/", "/images/");
+  }
+  return withLeadingSlash;
+}
+
 /**
  * 백엔드 절대 URL이 있을 때는 붙여주고, 없으면 상대 경로를 그대로 반환합니다.
  * @param {string} path - "/api/..." 또는 "/images/..." 형태의 경로
  */
 export function toBackendUrl(path, fallback = "") {
-  const base = getBackendBaseUrl(fallback);
-  if (!base) return path;
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${normalizedPath}`;
-}
+  const normalizedPath = normalizePath(path);
+  if (!normalizedPath) return normalizedPath;
+  if (isAbsoluteUrl(normalizedPath)) return normalizedPath;
 
+  const base = getBackendBaseUrl(fallback);
+  if (!base) return normalizedPath;
+
+  // VITE_API_BASE_URL이 ".../api"일 때 정적 리소스(/images 등)는 API prefix를 제거한 오리진으로 붙입니다.
+  const resolvedBase = normalizedPath.startsWith("/api/") ? base : base.replace(/\/api$/i, "");
+  return `${resolvedBase}${normalizedPath}`;
+}
