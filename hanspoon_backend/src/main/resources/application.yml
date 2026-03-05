@@ -6,8 +6,8 @@ server:
       enabled: true
       force: true
 
-uploadPath: file:///c:/hanspoon/img/
-itemImgLocation: c:/hanspoon/img
+uploadPath: ${UPLOAD_PATH:file:/opt/hanspoon/data/images/}
+itemImgLocation: ${ITEM_IMG_LOCATION:/opt/hanspoon/data/images}
 
 spring:
   profiles:
