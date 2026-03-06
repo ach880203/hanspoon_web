@@ -194,8 +194,8 @@ jobs:
           mkdir -p deploy_bundle/backend deploy_bundle/frontend
 
           cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
-          cp "hanspoon_backend/backend.env" "deploy_bundle/backend/.env"
-          chmod 600 "deploy_bundle/backend/.env"
+          cp "hanspoon_backend/backend.env" "deploy_bundle/backend/backend.env"
+          chmod 600 "deploy_bundle/backend/backend.env"
           cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
 
           if [ -f deploy.md ]; then
@@ -207,7 +207,6 @@ jobs:
         with:
           name: deploy-bundle-${{ github.sha }}
           path: deploy_bundle
-          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
@@ -283,7 +282,7 @@ jobs:
 
           # upload/download-artifact 조합에 따라 deploy_bundle이 한 단계 더 중첩될 수 있습니다.
           # 실제 배포 실패를 막기 위해 두 구조를 모두 허용합니다.
-          if [ ! -f "${PAYLOAD_DIR}/backend/.env" ] && [ -f "${PAYLOAD_DIR}/deploy_bundle/backend/.env" ]; then
+          if [ ! -f "${PAYLOAD_DIR}/backend/backend.env" ] && [ -f "${PAYLOAD_DIR}/deploy_bundle/backend/backend.env" ]; then
             PAYLOAD_DIR="${PAYLOAD_DIR}/deploy_bundle"
           fi
 
@@ -293,7 +292,7 @@ jobs:
 
           echo "[배포] 파일 복사"
           ${SUDO} cp "${PAYLOAD_DIR}/backend/app.jar" "${RELEASE_DIR}/backend/app.jar"
-          ${SUDO} cp "${PAYLOAD_DIR}/backend/.env" "${RELEASE_DIR}/backend/.env"
+          ${SUDO} cp "${PAYLOAD_DIR}/backend/backend.env" "${RELEASE_DIR}/backend/.env"
           ${SUDO} cp -r "${PAYLOAD_DIR}/frontend/." "${RELEASE_DIR}/frontend/"
 
           ${SUDO} mkdir -p "${APP_ROOT}/env"
