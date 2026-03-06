@@ -12,46 +12,42 @@ concurrency:
 jobs:
   deploy:
     name: EC2 배포
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, hanspoon-deploy]
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v4
+        with:
+          clean: true
 
       # ----------------------------
       # 1) 시크릿 필수값 검사
+      #   - self-hosted runner 구조라 SSH/SCP 시크릿은 더 이상 필요하지 않습니다.
+      #   - 앱이 실제로 사용하는 값만 검사해서 배포 잡음을 줄입니다.
       # ----------------------------
       - name: 배포/앱 시크릿 검사
-        shell: bash
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_PORT: ${{ secrets.EC2_PORT }}
-
           SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
           SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
           SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
-
           OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
           OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
           OAUTH_KAKAO_CLIENT_ID: ${{ secrets.OAUTH_KAKAO_CLIENT_ID }}
           OAUTH_KAKAO_CLIENT_SECRET: ${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}
           FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRATION: ${{ secrets.JWT_EXPIRATION }}
-
           PORTONE_STORE_ID: ${{ secrets.PORTONE_STORE_ID }}
           PORTONE_API_SECRET: ${{ secrets.PORTONE_API_SECRET }}
           PORTONE_CHANNEL_KEY_KAKAO: ${{ secrets.PORTONE_CHANNEL_KEY_KAKAO }}
           PORTONE_CHANNEL_KEY_TOSS: ${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}
           PORTONE_CHANNEL_KEY_TOSS_PAYMENTS: ${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}
-
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
-
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
           VITE_KAKAO_JS_KEY: ${{ secrets.VITE_KAKAO_JS_KEY }}
           VITE_JUSO_API_KEY: ${{ secrets.VITE_JUSO_API_KEY }}
@@ -59,9 +55,6 @@ jobs:
           set -euo pipefail
 
           REQUIRED_KEYS=(
-            EC2_HOST
-            EC2_USER
-            EC2_SSH_KEY
             SPRING_DATASOURCE_URL
             SPRING_DATASOURCE_USERNAME
             SPRING_DATASOURCE_PASSWORD
@@ -90,27 +83,23 @@ jobs:
             fi
           done
 
-          # 포트는 선택값이지만, 지정했다면 숫자 형식이어야 합니다.
-          if [ -n "${EC2_PORT:-}" ] && ! [[ "${EC2_PORT}" =~ ^[0-9]+$ ]]; then
-            echo "::warning::GitHub Secrets의 EC2_PORT 값이 숫자가 아닙니다. 기본 포트 22를 사용합니다."
-          fi
-
       # ----------------------------
       # 2) 런타임/빌드 환경파일 생성
-      #   - 백엔드는 런타임용 env(서버에서 systemd가 읽는 값)
-      #   - 프런트는 빌드 시점 env(Vite)
+      #   - 백엔드는 systemd EnvironmentFile 용도
+      #   - 프런트는 Vite 빌드 시점 env 용도
       # ----------------------------
-      - name: 백엔드 런타임 환경파일 생성(번들 포함용)
-        shell: bash
+      - name: 백엔드 런타임 환경파일 생성
         run: |
           set -euo pipefail
 
-          # 시크릿이 비어 있으면 리눅스 배포 기본 경로를 사용합니다.
           UPLOAD_PATH="${{ secrets.UPLOAD_PATH }}"
           ITEM_IMG_LOCATION="${{ secrets.ITEM_IMG_LOCATION }}"
+          SPRING_PROFILES_ACTIVE="${{ secrets.SPRING_PROFILES_ACTIVE }}"
+
           if [ -z "${UPLOAD_PATH}" ]; then
             UPLOAD_PATH="file:/opt/hanspoon/data/images/"
           fi
+
           if [ -z "${ITEM_IMG_LOCATION}" ]; then
             ITEM_IMG_LOCATION="/opt/hanspoon/data/images"
           fi
@@ -134,12 +123,15 @@ jobs:
             echo "KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}"
             echo "UPLOAD_PATH=${UPLOAD_PATH}"
             echo "ITEM_IMG_LOCATION=${ITEM_IMG_LOCATION}"
+            if [ -n "${SPRING_PROFILES_ACTIVE}" ]; then
+              echo "SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE}"
+            fi
           } > hanspoon_backend/backend.env
+
           chmod 600 hanspoon_backend/backend.env
 
-      - name: 프런트엔드 빌드용 환경파일 생성(Vite)
+      - name: 프런트엔드 빌드용 환경파일 생성
         working-directory: hanspoon_frontend
-        shell: bash
         run: |
           set -euo pipefail
 
@@ -150,19 +142,17 @@ jobs:
           } > .env.production
 
       # ----------------------------
-      # 3) 백엔드 빌드(Gradle)
+      # 3) 빌드
       # ----------------------------
       - name: JDK 21 설정
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
 
-      - name: 백엔드 빌드(bootJar)
+      - name: 백엔드 빌드
         id: backend_build
         working-directory: hanspoon_backend
-        shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
@@ -177,241 +167,24 @@ jobs:
 
           echo "jar_path=${JAR_PATH}" >> "${GITHUB_OUTPUT}"
 
-      # ----------------------------
-      # 4) 프런트 빌드(Vite)
-      # ----------------------------
       - name: Node.js 20 설정
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: hanspoon_frontend/package-lock.json
 
       - name: 프런트엔드 빌드
         working-directory: hanspoon_frontend
-        shell: bash
         run: |
           set -euo pipefail
           npm ci
           npm run build
 
       # ----------------------------
-      # 5) 배포 번들 생성(서버로 올릴 것만 묶기)
-      #   - backend/app.jar
-      #   - backend/.env (런타임)
-      #   - frontend/dist (정적)
+      # 4) 동일 서버 로컬 배포
+      #   - self-hosted runner가 EC2 안에서 실행되므로 SSH/SCP가 필요 없습니다.
+      #   - 배포 실패 원인이던 Runner IP/SSH 포트 탐지 단계를 제거합니다.
       # ----------------------------
-      - name: 배포 번들 생성
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          rm -rf deploy_bundle
-          mkdir -p deploy_bundle/backend deploy_bundle/frontend
-
-          cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
-
-          cp "hanspoon_backend/backend.env" "deploy_bundle/backend/.env"
-          chmod 644 "deploy_bundle/backend/.env" # scp-action이 읽을 수 있게(서버에서 600으로 다시 잠금)
-
-          cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
-
-          if [ -f deploy.md ]; then
-            cp deploy.md deploy_bundle/deploy.md
-          else
-            echo "::warning::저장소 루트에 deploy.md가 없어 배포 번들에 포함하지 않습니다."
-          fi
-
-      # ----------------------------
-      # 6) 배포 대상(호스트/포트) 정규화
-      #   - 시크릿 값이 잘못되어도 공인 호스트/기본 포트로 자동 폴백
-      # ----------------------------
-      - name: 배포 대상 결정
-        id: deploy_target
-        shell: bash
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_PORT: ${{ secrets.EC2_PORT }}
-          EC2_FALLBACK_HOST: ${{ secrets.EC2_FALLBACK_HOST }}
-        run: |
-          set -euo pipefail
-
-          # 폴백 호스트는 선택값입니다. (예: EIP를 시크릿에 저장한 값)
-          FALLBACK_HOST="${EC2_FALLBACK_HOST:-}"
-
-          HOST="${EC2_HOST}"
-          # EC2_PORT 시크릿이 있으면 우선 사용하고, 없으면 22를 우선 후보로 사용합니다.
-          PORT="${EC2_PORT:-22}"
-
-          if [ -n "${PORT}" ] && ! [[ "${PORT}" =~ ^[0-9]+$ ]]; then
-            echo "::warning::EC2_PORT(${PORT})가 숫자가 아니어서 22로 대체합니다."
-            PORT="22"
-          fi
-
-          if [ -z "${HOST}" ]; then
-            if [ -n "${FALLBACK_HOST}" ]; then
-              echo "::warning::EC2_HOST가 비어 있어 EC2_FALLBACK_HOST를 사용합니다."
-              HOST="${FALLBACK_HOST}"
-            else
-              echo "::error::EC2_HOST가 비어 있고 EC2_FALLBACK_HOST도 없습니다."
-              exit 1
-            fi
-          fi
-
-          RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
-          if [ -z "${RESOLVED_IPS}" ]; then
-            if [ -n "${FALLBACK_HOST}" ] && [ "${HOST}" != "${FALLBACK_HOST}" ]; then
-              echo "::warning::EC2_HOST(${HOST}) DNS 해석에 실패해 EC2_FALLBACK_HOST로 전환합니다."
-              HOST="${FALLBACK_HOST}"
-              RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
-            fi
-          fi
-
-          # GitHub Hosted Runner에서 사설IP는 접속 불가라 폴백합니다.
-          IS_PRIVATE_IP="0"
-          for ip in ${RESOLVED_IPS}; do
-            if [[ "${ip}" =~ ^10\. ]] || [[ "${ip}" =~ ^192\.168\. ]] || [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
-              IS_PRIVATE_IP="1"
-              break
-            fi
-          done
-          if [ "${IS_PRIVATE_IP}" = "1" ]; then
-            if [ -n "${FALLBACK_HOST}" ] && [ "${HOST}" != "${FALLBACK_HOST}" ]; then
-              echo "::warning::EC2_HOST(${HOST})가 사설 IP로 해석되어 EC2_FALLBACK_HOST로 전환합니다."
-              HOST="${FALLBACK_HOST}"
-              RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
-            fi
-          fi
-
-          FINAL_HOST="${HOST}"
-          FIRST_PUBLIC_IP="$(printf '%s\n' ${RESOLVED_IPS} | head -n 1)"
-          if [ -n "${FIRST_PUBLIC_IP}" ]; then
-            FINAL_HOST="${FIRST_PUBLIC_IP}"
-          fi
-
-          # SSH 포트 자동 탐색: 시크릿 포트 -> 22 -> 443 순서로 확인합니다.
-          CANDIDATE_PORTS=("${PORT}" "22" "443")
-          SELECTED_PORT=""
-          for CANDIDATE_PORT in "${CANDIDATE_PORTS[@]}"; do
-            if ! [[ "${CANDIDATE_PORT}" =~ ^[0-9]+$ ]]; then
-              continue
-            fi
-            if timeout 6 bash -c "cat < /dev/null > /dev/tcp/${FINAL_HOST}/${CANDIDATE_PORT}" 2>/dev/null; then
-              SELECTED_PORT="${CANDIDATE_PORT}"
-              break
-            fi
-          done
-
-          # 현재 호스트에서 모두 실패하면 폴백 호스트에서도 한 번 더 시도합니다.
-          if [ -z "${SELECTED_PORT}" ]; then
-            if [ -n "${FALLBACK_HOST}" ] && [ "${FINAL_HOST}" != "${FALLBACK_HOST}" ]; then
-              echo "::warning::${FINAL_HOST}에서 SSH 포트 탐색 실패. EC2_FALLBACK_HOST(${FALLBACK_HOST})로 재시도합니다."
-              FINAL_HOST="${FALLBACK_HOST}"
-              for CANDIDATE_PORT in "${CANDIDATE_PORTS[@]}"; do
-                if ! [[ "${CANDIDATE_PORT}" =~ ^[0-9]+$ ]]; then
-                  continue
-                fi
-                if timeout 6 bash -c "cat < /dev/null > /dev/tcp/${FINAL_HOST}/${CANDIDATE_PORT}" 2>/dev/null; then
-                  SELECTED_PORT="${CANDIDATE_PORT}"
-                  break
-                fi
-              done
-            fi
-          fi
-
-          if [ -z "${SELECTED_PORT}" ]; then
-            echo "::error::배포 대상 SSH 포트를 찾지 못했습니다. 시도 포트: ${CANDIDATE_PORTS[*]}"
-            exit 1
-          fi
-          PORT="${SELECTED_PORT}"
-
-          echo "host=${FINAL_HOST}" >> "${GITHUB_OUTPUT}"
-          echo "port=${PORT}" >> "${GITHUB_OUTPUT}"
-          echo "[결정] 최종 배포 대상: ${FINAL_HOST}:${PORT}"
-
-      # ----------------------------
-      # 7) 업로드 전 SSH 포트 연결 점검
-      #   - 네트워크 차단(SG/NACL/라우팅/사설IP) 시 여기서 빠르게 실패시킴
-      # ----------------------------
-      - name: EC2 SSH 연결 사전 점검
-        shell: bash
-        env:
-          DEPLOY_HOST: ${{ steps.deploy_target.outputs.host }}
-          DEPLOY_PORT: ${{ steps.deploy_target.outputs.port }}
-        run: |
-          set -euo pipefail
-
-          HOST="${DEPLOY_HOST}"
-          PORT="${DEPLOY_PORT}"
-
-          echo "[점검] 대상: ${HOST}:${PORT}"
-
-          # 호스트가 DNS로 해석되는지 먼저 확인합니다.
-          RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
-          if [ -z "${RESOLVED_IPS}" ]; then
-            echo "::error::EC2_HOST(${HOST}) DNS 해석에 실패했습니다. 오타/만료된 DNS/잘못된 호스트값을 확인하세요."
-            exit 1
-          fi
-
-          echo "[점검] 해석된 IPv4: ${RESOLVED_IPS}"
-
-          # GitHub Hosted Runner는 인터넷에서 접속하므로 사설IP 대상은 연결할 수 없습니다.
-          IS_PRIVATE_IP="0"
-          for ip in ${RESOLVED_IPS}; do
-            if [[ "${ip}" =~ ^10\. ]] || [[ "${ip}" =~ ^192\.168\. ]] || [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
-              IS_PRIVATE_IP="1"
-              break
-            fi
-          done
-          if [ "${IS_PRIVATE_IP}" = "1" ]; then
-            echo "::error::EC2_HOST(${HOST})가 사설 IP 대역으로 해석됩니다. GitHub Hosted Runner에서 직접 SSH/SCP 접속할 수 없습니다."
-            echo "::error::공인 IP/EIP 또는 공인 DNS를 사용하거나, self-hosted runner(같은 VPC) 또는 SSM 방식으로 전환하세요."
-            exit 1
-          fi
-
-          CONNECT_OK="0"
-          for attempt in 1 2 3; do
-            if timeout 8 bash -c "cat < /dev/null > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
-              CONNECT_OK="1"
-              break
-            fi
-            echo "::warning::SSH TCP 점검 ${attempt}/3 실패: ${HOST}:${PORT}"
-            sleep 3
-          done
-
-          if [ "${CONNECT_OK}" != "1" ]; then
-            echo "::error::GitHub Runner에서 ${HOST}:${PORT} TCP 접속에 실패했습니다(i/o timeout 가능)."
-            echo "::error::보안 그룹 인바운드(SSH), NACL, 라우팅(IGW), EC2 공인 IP/탄력 IP, 사설 서브넷 여부를 확인하세요."
-            exit 1
-          fi
-
-          echo "[점검] SSH 포트 연결 가능"
-
-      # ----------------------------
-      # 8) EC2로 업로드(SCP)
-      # ----------------------------
-      - name: EC2로 배포 번들 업로드
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ steps.deploy_target.outputs.host }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ steps.deploy_target.outputs.port }}
-          source: deploy_bundle
-          target: /tmp/hanspoon/${{ github.sha }}
-          overwrite: true
-          timeout: 5m
-          command_timeout: 15m
-
-      # ----------------------------
-      # 9) EC2에서 배포 실행(릴리즈 + current 링크 + 서비스 재시작)
-      #   - Terraform userdata 기준 경로:
-      #     /opt/hanspoon/current/backend/app.jar
-      #     /opt/hanspoon/current/frontend/ (nginx root)
-      #     /opt/hanspoon/env/backend.env (systemd EnvironmentFile)
-      # ----------------------------
-      - name: EC2 배포 실행
-        uses: appleboy/ssh-action@v1.2.0
+      - name: EC2 로컬 배포 실행
         env:
           APP_ROOT: ${{ secrets.EC2_APP_ROOT }}
           SERVICE_NAME: ${{ secrets.EC2_SERVICE_NAME }}
@@ -419,147 +192,108 @@ jobs:
           HEALTHCHECK_RETRY: ${{ secrets.EC2_HEALTHCHECK_RETRY }}
           HEALTHCHECK_DELAY: ${{ secrets.EC2_HEALTHCHECK_DELAY }}
           KEEP_RELEASES: ${{ secrets.EC2_KEEP_RELEASES }}
-        with:
-          host: ${{ steps.deploy_target.outputs.host }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ steps.deploy_target.outputs.port }}
-          command_timeout: 30m
-          script_stop: true
-          envs: APP_ROOT,SERVICE_NAME,HEALTHCHECK_URL,HEALTHCHECK_RETRY,HEALTHCHECK_DELAY,KEEP_RELEASES
-          script: |
-            bash -se <<'BASH_SCRIPT'
-            set -euo pipefail
+        run: |
+          set -euo pipefail
 
-            echo "[배포] 시작"
-            echo "[배포] 사용자: $(whoami)"
+          APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
+          KEEP_RELEASES="${KEEP_RELEASES:-5}"
+          HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1/api/actuator/health}"
+          HEALTHCHECK_RETRY="${HEALTHCHECK_RETRY:-20}"
+          HEALTHCHECK_DELAY="${HEALTHCHECK_DELAY:-3}"
 
-            APP_ROOT="${APP_ROOT:-/opt/hanspoon}"
-            KEEP_RELEASES="${KEEP_RELEASES:-5}"
+          if ! [[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]]; then
+            echo "::warning::KEEP_RELEASES 값이 숫자가 아니어서 기본값 5를 사용합니다."
+            KEEP_RELEASES="5"
+          fi
 
-            if ! [[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]]; then
-              echo "[경고] KEEP_RELEASES 값이 숫자가 아니어서 기본값 5를 사용합니다."
-              KEEP_RELEASES="5"
-            fi
+          SUDO="sudo"
+          if [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+          elif ! sudo -n true >/dev/null 2>&1; then
+            echo "::error::현재 계정은 비밀번호 없는 sudo 권한이 없어 배포를 중단합니다."
+            exit 1
+          fi
 
-            SUDO="sudo"
-            if [ "$(id -u)" -eq 0 ]; then
-              SUDO=""
-            elif ! sudo -n true >/dev/null 2>&1; then
-              echo "[오류] 현재 계정은 비밀번호 없는 sudo 권한이 없어 배포를 중단합니다."
-              exit 1
-            fi
-
-            # 현재 SSH 접속 계정(예: ubuntu) 기준으로 릴리즈 .env 읽기 권한을 맞춥니다.
-            DEPLOY_USER="$(id -un)"
-
-            # 서비스 이름 자동 탐색(없으면 hanspoon-backend 기본)
-            SERVICE_NAME="${SERVICE_NAME:-}"
+          DEPLOY_USER="$(id -un)"
+          SERVICE_NAME="${SERVICE_NAME:-}"
+          if [ -z "${SERVICE_NAME}" ]; then
+            for CANDIDATE in hanspoon-backend hanspoon-backend.service hanspoon; do
+              if ${SUDO} systemctl status "${CANDIDATE}" >/dev/null 2>&1; then
+                SERVICE_NAME="${CANDIDATE}"
+                break
+              fi
+            done
             if [ -z "${SERVICE_NAME}" ]; then
-              for CANDIDATE in hanspoon-backend hanspoon-backend.service hanspoon; do
-                if ${SUDO} systemctl status "${CANDIDATE}" >/dev/null 2>&1; then
-                  SERVICE_NAME="${CANDIDATE}"
-                  break
-                fi
-              done
-              if [ -z "${SERVICE_NAME}" ]; then
-                SERVICE_NAME="hanspoon-backend"
+              SERVICE_NAME="hanspoon-backend"
+            fi
+          fi
+
+          RELEASE_DIR="${APP_ROOT}/releases/${GITHUB_SHA}"
+          CURRENT_LINK="${APP_ROOT}/current"
+
+          echo "[배포] 릴리즈 경로: ${RELEASE_DIR}"
+          ${SUDO} rm -rf "${RELEASE_DIR}" || true
+          ${SUDO} mkdir -p "${RELEASE_DIR}/backend" "${RELEASE_DIR}/frontend"
+
+          echo "[배포] 파일 복사"
+          ${SUDO} cp "${GITHUB_WORKSPACE}/hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "${RELEASE_DIR}/backend/app.jar"
+          ${SUDO} cp "${GITHUB_WORKSPACE}/hanspoon_backend/backend.env" "${RELEASE_DIR}/backend/.env"
+          ${SUDO} cp -r "${GITHUB_WORKSPACE}/hanspoon_frontend/dist/." "${RELEASE_DIR}/frontend/"
+
+          ${SUDO} mkdir -p "${APP_ROOT}/env"
+          ${SUDO} cp "${RELEASE_DIR}/backend/.env" "${APP_ROOT}/env/backend.env"
+          ${SUDO} chmod 600 "${APP_ROOT}/env/backend.env" || true
+          ${SUDO} chown "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}/backend/.env" || true
+          ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env" || true
+
+          if [ -f "${GITHUB_WORKSPACE}/deploy.md" ]; then
+            ${SUDO} cp "${GITHUB_WORKSPACE}/deploy.md" "${RELEASE_DIR}/deploy.md"
+          fi
+
+          echo "[배포] current 링크 전환"
+          if ${SUDO} test -d "${CURRENT_LINK}" && ! ${SUDO} test -L "${CURRENT_LINK}"; then
+            ${SUDO} rm -rf "${CURRENT_LINK}"
+          fi
+          ${SUDO} ln -sfnT "${RELEASE_DIR}" "${CURRENT_LINK}"
+
+          echo "[배포] 서비스 재시작: ${SERVICE_NAME}"
+          ${SUDO} systemctl restart "${SERVICE_NAME}"
+          ${SUDO} systemctl is-active --quiet "${SERVICE_NAME}" || {
+            echo "::error::서비스가 active 상태가 아닙니다."
+            ${SUDO} journalctl -u "${SERVICE_NAME}" -n 160 --no-pager || true
+            exit 1
+          }
+
+          if ${SUDO} systemctl status nginx >/dev/null 2>&1; then
+            ${SUDO} nginx -t
+            ${SUDO} systemctl reload nginx || ${SUDO} systemctl restart nginx
+          fi
+
+          echo "[배포] 헬스체크: ${HEALTHCHECK_URL}"
+          OK="0"
+          for i in $(seq 1 "${HEALTHCHECK_RETRY}"); do
+            if curl -fsS "${HEALTHCHECK_URL}" >/dev/null; then
+              OK="1"
+              break
+            fi
+            sleep "${HEALTHCHECK_DELAY}"
+          done
+
+          if [ "${OK}" != "1" ]; then
+            echo "::error::헬스체크 실패"
+            ${SUDO} journalctl -u "${SERVICE_NAME}" -n 160 --no-pager || true
+            exit 1
+          fi
+
+          if [ "${KEEP_RELEASES}" -gt 0 ]; then
+            IDX=0
+            for REL in $(${SUDO} ls -1dt "${APP_ROOT}"/releases/* 2>/dev/null || true); do
+              IDX=$((IDX + 1))
+              if [ "${IDX}" -le "${KEEP_RELEASES}" ]; then
+                continue
               fi
-            fi
+              ${SUDO} rm -rf -- "${REL}"
+            done
+          fi
 
-            TMP_DIR="/tmp/hanspoon/${{ github.sha }}"
-            PAYLOAD_DIR="${TMP_DIR}/deploy_bundle"
-
-            # scp-action 업로드 구조가 달라질 때를 대비한 보정
-            if [ ! -d "${PAYLOAD_DIR}" ]; then
-              PAYLOAD_DIR="$(find "${TMP_DIR}" -maxdepth 4 -type d -name 'deploy_bundle' -print -quit || true)"
-            fi
-            if [ -z "${PAYLOAD_DIR:-}" ] || [ ! -d "${PAYLOAD_DIR}" ]; then
-              echo "[오류] 배포 번들을 찾지 못했습니다: ${TMP_DIR}"
-              ls -al "${TMP_DIR}" || true
-              exit 1
-            fi
-
-            RELEASE_DIR="${APP_ROOT}/releases/${{ github.sha }}"
-            CURRENT_LINK="${APP_ROOT}/current"
-
-            echo "[배포] 릴리즈 경로: ${RELEASE_DIR}"
-            ${SUDO} rm -rf "${RELEASE_DIR}" || true
-            ${SUDO} mkdir -p "${RELEASE_DIR}/backend" "${RELEASE_DIR}/frontend"
-
-            echo "[배포] 파일 복사"
-            ${SUDO} cp "${PAYLOAD_DIR}/backend/app.jar" "${RELEASE_DIR}/backend/app.jar"
-            ${SUDO} cp "${PAYLOAD_DIR}/backend/.env" "${RELEASE_DIR}/backend/.env"
-            ${SUDO} cp -r "${PAYLOAD_DIR}/frontend/." "${RELEASE_DIR}/frontend/"
-
-            # (핵심) systemd가 읽는 위치로 env 반영
-            ${SUDO} mkdir -p "${APP_ROOT}/env"
-            ${SUDO} cp "${RELEASE_DIR}/backend/.env" "${APP_ROOT}/env/backend.env"
-            ${SUDO} chmod 600 "${APP_ROOT}/env/backend.env" || true
-
-            # 릴리즈 내부 .env는 애플리케이션 실행 계정이 읽을 수 있어야 합니다.
-            ${SUDO} chown "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}/backend/.env" || true
-            ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env" || true
-
-            if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
-              ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md" || true
-            fi
-
-            echo "[배포] current 링크 전환"
-            # 기존 current가 디렉토리인 경우, ln -sfn은 링크 교체가 아니라 내부에 링크를 생성하므로 먼저 제거합니다.
-            if ${SUDO} test -d "${CURRENT_LINK}" && ! ${SUDO} test -L "${CURRENT_LINK}"; then
-              ${SUDO} rm -rf "${CURRENT_LINK}"
-            fi
-            ${SUDO} ln -sfnT "${RELEASE_DIR}" "${CURRENT_LINK}"
-
-            echo "[배포] 서비스 재시작: ${SERVICE_NAME}"
-            ${SUDO} systemctl restart "${SERVICE_NAME}"
-            ${SUDO} systemctl is-active --quiet "${SERVICE_NAME}" || {
-              echo "[오류] 서비스가 active가 아닙니다. 로그를 출력합니다."
-              ${SUDO} journalctl -u "${SERVICE_NAME}" -n 160 --no-pager || true
-              exit 1
-            }
-
-            # nginx 리로드(있으면)
-            if ${SUDO} systemctl status nginx >/dev/null 2>&1; then
-              ${SUDO} nginx -t
-              ${SUDO} systemctl reload nginx || ${SUDO} systemctl restart nginx
-            fi
-
-            # 헬스체크(선택)
-            if [ -n "${HEALTHCHECK_URL:-}" ]; then
-              HEALTHCHECK_RETRY="${HEALTHCHECK_RETRY:-20}"
-              HEALTHCHECK_DELAY="${HEALTHCHECK_DELAY:-3}"
-              echo "[배포] 헬스체크: ${HEALTHCHECK_URL}"
-
-              OK="0"
-              for i in $(seq 1 "${HEALTHCHECK_RETRY}"); do
-                if curl -fsS "${HEALTHCHECK_URL}" >/dev/null; then
-                  OK="1"
-                  break
-                fi
-                sleep "${HEALTHCHECK_DELAY}"
-              done
-
-              if [ "${OK}" != "1" ]; then
-                echo "[오류] 헬스체크 실패"
-                ${SUDO} journalctl -u "${SERVICE_NAME}" -n 160 --no-pager || true
-                exit 1
-              fi
-            fi
-
-            # 오래된 릴리즈 정리
-            if [ "${KEEP_RELEASES}" -gt 0 ]; then
-              IDX=0
-              for REL in $(${SUDO} ls -1dt "${APP_ROOT}"/releases/* 2>/dev/null || true); do
-                IDX=$((IDX + 1))
-                if [ "${IDX}" -le "${KEEP_RELEASES}" ]; then
-                  continue
-                fi
-                ${SUDO} rm -rf -- "${REL}"
-              done
-            fi
-
-            rm -rf "${TMP_DIR}" || true
-            echo "[배포] 완료"
-            BASH_SCRIPT
+          echo "[배포] 완료"

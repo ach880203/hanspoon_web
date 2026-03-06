@@ -12,7 +12,7 @@ itemImgLocation: ${ITEM_IMG_LOCATION:/opt/hanspoon/data/images}
 
 spring:
   profiles:
-    active: dev
+    active: ${SPRING_PROFILES_ACTIVE:dev}
 
   application:
     name: hanspoon
