@@ -7,30 +7,40 @@ import com.project.hanspoon.common.payment.dto.PaymentDto;
 import com.project.hanspoon.common.payment.dto.PortOneDto;
 import com.project.hanspoon.common.user.entity.User;
 import com.project.hanspoon.common.security.CustomUserDetails;
+import com.project.hanspoon.common.security.jwt.JwtTokenProvider;
 import com.project.hanspoon.common.payment.service.PaymentService;
 import com.project.hanspoon.common.payment.service.PortOneService;
 import com.project.hanspoon.common.user.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * 결제 REST API Controller
+ * 결제 REST API Controller.
+ * - /verify: 결제 금액 검증 (최근 5분 이내 인증 필수)
+ * - /checkout-info, /product, /class: 결제 시작 (최근 5분 이내 인증 필수)
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/payment")
 @RequiredArgsConstructor
 public class PaymentController {
 
+    private static final long PAYMENT_AUTH_MAX_AGE_SEC = 300L; // 5분
+
     private final PaymentService paymentService;
     private final PortOneService portOneService;
     private final UserService userService;
     private final PortOneConfig portOneConfig;
+    private final JwtTokenProvider jwtTokenProvider;
 
     /**
      * 결제 준비 정보 조회
@@ -43,10 +53,18 @@ public class PaymentController {
             @RequestParam int price,
             @RequestParam(defaultValue = "1") int quantity,
             @RequestParam String orderName,
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            HttpServletRequest request) {
 
         if (userDetails == null) {
             return ResponseEntity.status(401).body(ApiResponse.error("로그인이 필요합니다."));
+        }
+
+        // 결제 시작: 최근 5분 이내 인증 검증
+        String accessToken = extractBearer(request);
+        if (!jwtTokenProvider.isWithinRecentAuth(accessToken, PAYMENT_AUTH_MAX_AGE_SEC)) {
+            return ResponseEntity.status(401).body(ApiResponse.error(
+                    "결제를 위해 재로그인이 필요합니다. (5분 이내 인증 필요)"));
         }
 
         User user = userService.findById(userDetails.getUserId());
@@ -99,18 +117,25 @@ public class PaymentController {
     @PostMapping("/verify")
     public ResponseEntity<ApiResponse<PortOneDto.PaymentResult>> verifyPayment(
             @RequestBody PortOneDto.PaymentVerifyRequest verifyRequest,
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            HttpServletRequest request) {
 
-        System.out.println(
-                "결제 검증 요청 시작: paymentId=" + verifyRequest.getPaymentId() + ", orderId=" + verifyRequest.getOrderId());
-        System.out.println("userDetails 정보: " + userDetails);
+        log.info("결제 검증 요청: paymentId={}, orderId={}",
+                verifyRequest.getPaymentId(), verifyRequest.getOrderId());
 
         if (userDetails == null) {
-            System.out.println("userDetails가 null입니다. 401 에러를 반환합니다.");
             return ResponseEntity.status(401).body(ApiResponse.error("로그인이 필요합니다."));
         }
 
-        System.out.println("사용자 인증 완료: userId=" + userDetails.getUserId());
+        // ⚠️ 결제는 카드 춴신 취약점 대뭄. 최근 5분 이내 인증만 허용합니다.
+        String accessToken = extractBearer(request);
+        if (!jwtTokenProvider.isWithinRecentAuth(accessToken, PAYMENT_AUTH_MAX_AGE_SEC)) {
+            log.warn("결제 고위인증 실패: userId={} - auth_time 초과", userDetails.getUserId());
+            return ResponseEntity.status(401).body(ApiResponse.error(
+                    "결제 보안을 위해 재로그인이 필요합니다. (5분 이내 인증 필요)"));
+        }
+
+        log.info("결제 고위인증 통과: userId={}", userDetails.getUserId());
         User user = userService.findById(userDetails.getUserId());
 
         PortOneDto.PaymentResult result = portOneService.verifyAndSavePayment(user, verifyRequest);
@@ -219,5 +244,18 @@ public class PaymentController {
                 .build();
 
         return ResponseEntity.ok(ApiResponse.ok(configInfo));
+    }
+
+    // ----------------------------------------------------------------
+    // Internal helpers
+    // ----------------------------------------------------------------
+
+    /** Authorization 헤더에서 Bearer 토큰 추출. */
+    private String extractBearer(HttpServletRequest request) {
+        String bearer = request.getHeader("Authorization");
+        if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
+            return bearer.substring(7);
+        }
+        return null;
     }
 }

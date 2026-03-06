@@ -79,6 +79,6 @@ public class Product {
     private int stock;
 
     @Lob
-    @Column(name = "detail_content", columnDefinition = "LONGTEXT")
+    @Column(name = "detail_content", columnDefinition = "MEDIUMTEXT")
     private String detailContent;
 }

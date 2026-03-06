@@ -95,21 +95,48 @@ server {
   root /opt/hanspoon/current/frontend;
   index index.html;
 
-  location / {
-    try_files $uri $uri/ /index.html;
+  location /images/ {
+    alias /opt/hanspoon/data/images/;
+    try_files $uri $uri/ =404;
   }
 
-  location /api/ {
-    proxy_pass http://127.0.0.1:8080/;
+  # OAuth2 시작/콜백 경로를 백엔드로 전달합니다.
+  location /oauth2/ {
+    proxy_pass http://127.0.0.1:8080/oauth2/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   }
 
-  location /images/ {
-    alias /opt/hanspoon/data/images/;
-    try_files $uri =404;
+  location /login/oauth2/ {
+    proxy_pass http://127.0.0.1:8080/login/oauth2/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # /api/api/* -> backend /api/* (기존 프런트 호출 호환)
+  location /api/api/ {
+    proxy_pass http://127.0.0.1:8080/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  # /api/* -> backend /api/*
+  location /api/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   }
 
   location = /api/actuator/health {

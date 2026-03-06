@@ -33,7 +33,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState({ recipes: true, classes: true, market: true });
   const [error, setError] = useState({ recipes: "", classes: "", market: "" });
 
-  const RECIPE_DEFAULT_IMG = FALLBACK_RECIPE_IMG;
+  const RECIPE_DEFAULT_IMG = "/images/recipe/default.jpg";
 
   useEffect(() => {
     let ignore = false;
@@ -77,7 +77,7 @@ export default function HomePage() {
           title: r.title,
           sub: `리뷰 ${r.reviewCount || 0}`,
           chip: r.category ? r.category : "", // 서버에 category 필드가 있으면 표시
-          imageSrc: r.recipeImg ? toBackendUrl(`/images/recipe/${r.recipeImg}`) : RECIPE_DEFAULT_IMG,
+          imageSrc: r.recipeImg ? toBackendUrl(`/images/recipe/${r.recipeImg}`, "http://3.36.180.241:8080") : RECIPE_DEFAULT_IMG,
           imageAlt: r.title,
           to: `/recipes/${r.id}`, // 리스트 페이지랑 동일한 상세 라우트
         }));
@@ -170,7 +170,7 @@ export default function HomePage() {
             originPrice: origin,
             imageSrc:
               (typeof p?.thumbnailUrl === "string" && p.thumbnailUrl.startsWith("/")
-                ? toBackendUrl(p.thumbnailUrl)
+                ? toBackendUrl(p.thumbnailUrl, "http://3.36.180.241:8080")
                 : p?.thumbnailUrl) ||
               p?.imgUrl ||
               p?.imageUrl ||

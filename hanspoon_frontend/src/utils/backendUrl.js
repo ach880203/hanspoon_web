@@ -5,7 +5,19 @@
  */
 export function getBackendBaseUrl(fallback = "") {
   const raw = (import.meta.env.VITE_API_BASE_URL || fallback || "").trim();
-  return raw.replace(/\/+$/, "");
+  if (!raw) return "";
+
+  const trimmed = raw.replace(/\/+$/, "");
+  const isLocalBaseUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmed);
+  const isBrowserLocal =
+    typeof window !== "undefined" &&
+    /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+
+  // 배포 도메인에서 localhost 값이 남아 있으면 상대 경로를 사용하도록 비웁니다.
+  if (isLocalBaseUrl && !isBrowserLocal) {
+    return "";
+  }
+  return trimmed;
 }
 
 function isAbsoluteUrl(path) {
@@ -36,7 +48,8 @@ export function toBackendUrl(path, fallback = "") {
   const base = getBackendBaseUrl(fallback);
   if (!base) return normalizedPath;
 
-  // VITE_API_BASE_URL이 ".../api"일 때 정적 리소스(/images 등)는 API prefix를 제거한 오리진으로 붙입니다.
+  // API 호출이 아닌 정적 리소스는 /api 접두어를 제거한 오리진에 붙입니다.
   const resolvedBase = normalizedPath.startsWith("/api/") ? base : base.replace(/\/api$/i, "");
   return `${resolvedBase}${normalizedPath}`;
 }
+

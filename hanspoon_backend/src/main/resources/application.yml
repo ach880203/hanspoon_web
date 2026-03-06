@@ -1,5 +1,6 @@
 server:
   port: ${SERVER_PORT:8080}
+  forward-headers-strategy: framework
   servlet:
     encoding:
       charset: UTF-8
@@ -23,9 +24,13 @@ spring:
     password: 1234
 
   jpa:
+    defer-datasource-initialization: true
     open-in-view: false
     hibernate:
       ddl-auto: update
+  sql:
+    init:
+      mode: always
     show-sql: false
     properties:
       hibernate:
@@ -76,7 +81,6 @@ logging:
     root: info
     org.hibernate.SQL: warn
     org.hibernate.type.descriptor.sql: warn
-    com.project.hanspoon.common.security.jwt: warn
 
 jwt:
   secret: ${JWT_SECRET:mySecretKeyForJwtTokenGenerationMustBe256BitsLong}
