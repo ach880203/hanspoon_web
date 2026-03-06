@@ -7,8 +7,8 @@ import "./Auth/Auth.css";
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const googleOAuthUrl = toBackendUrl("/oauth2/authorization/google", "http://3.36.180.241:8080");
-  const kakaoOAuthUrl = toBackendUrl("/oauth2/authorization/kakao", "http://3.36.180.241:8080");
+  const googleOAuthUrl = toBackendUrl("/oauth2/authorization/google");
+  const kakaoOAuthUrl = toBackendUrl("/oauth2/authorization/kakao");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

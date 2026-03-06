@@ -61,7 +61,7 @@ function Register() {
     };
 
     const handleOAuthRegister = (provider) => {
-        window.location.href = toBackendUrl(`/oauth2/authorization/${provider}`, 'http://3.36.180.241:8080');
+        window.location.href = toBackendUrl(`/oauth2/authorization/${provider}`);
     };
 
     return (
