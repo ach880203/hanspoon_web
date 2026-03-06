@@ -278,12 +278,18 @@ jobs:
 
           RELEASE_DIR="${APP_ROOT}/releases/${GITHUB_SHA}"
           CURRENT_LINK="${APP_ROOT}/current"
-          PAYLOAD_DIR="${GITHUB_WORKSPACE}/deploy_bundle"
-
-          # upload/download-artifact 조합에 따라 deploy_bundle이 한 단계 더 중첩될 수 있습니다.
-          # 실제 배포 실패를 막기 위해 두 구조를 모두 허용합니다.
-          if [ ! -f "${PAYLOAD_DIR}/backend/backend.env" ] && [ -f "${PAYLOAD_DIR}/deploy_bundle/backend/backend.env" ]; then
-            PAYLOAD_DIR="${PAYLOAD_DIR}/deploy_bundle"
+          # download-artifact가 푸는 위치는 액션 버전/지정 path에 따라 달라질 수 있습니다.
+          # 실제 서버에서는 세 가지 구조가 모두 관찰될 수 있어 순서대로 확인합니다.
+          if [ -f "${GITHUB_WORKSPACE}/backend/backend.env" ]; then
+            PAYLOAD_DIR="${GITHUB_WORKSPACE}"
+          elif [ -f "${GITHUB_WORKSPACE}/deploy_bundle/backend/backend.env" ]; then
+            PAYLOAD_DIR="${GITHUB_WORKSPACE}/deploy_bundle"
+          elif [ -f "${GITHUB_WORKSPACE}/deploy_bundle/deploy_bundle/backend/backend.env" ]; then
+            PAYLOAD_DIR="${GITHUB_WORKSPACE}/deploy_bundle/deploy_bundle"
+          else
+            echo "::error::배포 번들 경로를 찾지 못했습니다."
+            find "${GITHUB_WORKSPACE}" -maxdepth 4 -type f | sort || true
+            exit 1
           fi
 
           echo "[배포] 릴리즈 경로: ${RELEASE_DIR}"
