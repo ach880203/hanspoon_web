@@ -92,18 +92,32 @@ export const OneDayClassDetail = () => {
     };
   };
 
+  const fallbackOnUnauthorized = useCallback(async (request, fallbackValue) => {
+    try {
+      return await request();
+    } catch (error) {
+      if (Number(error?.status) === 401) {
+        return fallbackValue;
+      }
+      throw error;
+    }
+  }, []);
+
   const loadClassData = useCallback(async (options = {}) => {
     const showLoading = options.showLoading !== false;
     if (showLoading) setLoading(true);
     setError("");
     try {
-      const [detailData, sessionsData, reviewData, myCompletedData, myWishData, inquiryData] = await Promise.all([
+      const [detailData, sessionsData] = await Promise.all([
         getOneDayClassDetail(classId),
         getOneDayClassSessions(classId),
-        getOneDayClassReviews(classId),
-        getMyOneDayReservations({ status: "COMPLETED", page: 0, size: 200 }),
-        getMyOneDayWishes().catch(() => []),
-        getOneDayInquiries(),
+      ]);
+
+      const [reviewData, myCompletedData, myWishData, inquiryData] = await Promise.all([
+        fallbackOnUnauthorized(() => getOneDayClassReviews(classId), []),
+        fallbackOnUnauthorized(() => getMyOneDayReservations({ status: "COMPLETED", page: 0, size: 200 }), { content: [] }),
+        fallbackOnUnauthorized(() => getMyOneDayWishes(), []),
+        fallbackOnUnauthorized(() => getOneDayInquiries(), []),
       ]);
 
       const completedList = Array.isArray(myCompletedData?.content) ? myCompletedData.content : [];
@@ -133,7 +147,7 @@ export const OneDayClassDetail = () => {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [classId, location.state]);
+  }, [classId, fallbackOnUnauthorized, location.state]);
 
   useEffect(() => {
     loadClassData();
