@@ -27,10 +27,6 @@ export function CartProvider({ children }) {
   };
 
   useEffect(() => {
-    refreshCount();
-  }, [refreshCount]);
-
-  useEffect(() => {
     if (authLoading) return;
     if (user) {
       refreshCount();
