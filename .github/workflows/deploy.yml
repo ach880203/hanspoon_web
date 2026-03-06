@@ -225,7 +225,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: deploy-bundle-${{ github.sha }}
-          path: deploy_bundle
+          path: .
 
       # ----------------------------
       # 5) 동일 서버 로컬 배포
@@ -279,6 +279,12 @@ jobs:
           RELEASE_DIR="${APP_ROOT}/releases/${GITHUB_SHA}"
           CURRENT_LINK="${APP_ROOT}/current"
           PAYLOAD_DIR="${GITHUB_WORKSPACE}/deploy_bundle"
+
+          # upload/download-artifact 조합에 따라 deploy_bundle이 한 단계 더 중첩될 수 있습니다.
+          # 실제 배포 실패를 막기 위해 두 구조를 모두 허용합니다.
+          if [ ! -f "${PAYLOAD_DIR}/backend/.env" ] && [ -f "${PAYLOAD_DIR}/deploy_bundle/backend/.env" ]; then
+            PAYLOAD_DIR="${PAYLOAD_DIR}/deploy_bundle"
+          fi
 
           echo "[배포] 릴리즈 경로: ${RELEASE_DIR}"
           ${SUDO} rm -rf "${RELEASE_DIR}" || true

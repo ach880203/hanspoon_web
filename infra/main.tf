@@ -47,20 +47,13 @@ resource "aws_security_group" "ec2_sg" {
   }
 
   ingress {
-    # APP 8080 (임시 오픈 - 나중에 /api만 쓰면 닫아도 됨)
-    description = "APP_8080_TEMP"
-    from_port   = var.app_port
-    to_port     = var.app_port
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "SSH_TEMP"
+    # SSH는 관리자 PC에서만 접속 가능하도록 제한합니다.
+    # 배포는 self-hosted runner가 서버 내부에서 처리하므로 전체 공개가 필요 없습니다.
+    description = "SSH_ADMIN_ONLY"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.allowed_ssh_cidr]
   }
 
   egress {
@@ -119,13 +112,47 @@ resource "aws_db_instance" "rds" {
   deletion_protection = false
 }
 
+resource "aws_iam_role" "ec2_ssm_role" {
+  name = "${var.project_name}-ec2-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_ssm_core" {
+  role       = aws_iam_role.ec2_ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ec2_ssm_profile" {
+  name = "${var.project_name}-ec2-ssm-profile"
+  role = aws_iam_role.ec2_ssm_role.name
+}
+
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu_2204.id
   instance_type          = var.ec2_instance_type
   key_name               = var.ec2_key_name
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_ssm_profile.name
 
   user_data = file("${path.module}/userdata.sh")
+
+  # 메타데이터 토큰을 강제해서 기본 보안 수준을 높입니다.
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
 
   tags = {
     Name = "${var.project_name}-ec2"
