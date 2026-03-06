@@ -57,7 +57,8 @@ public class AdminDashboardService {
                         // 2. 주문 상태
                         long paymentCompleted = orderRepository.countByStatus(OrderStatus.PAID)
                                         + reservationRepository.countByStatus(ReservationStatus.PAID);
-                        long preparing = orderRepository.countByStatus(OrderStatus.CREATED);
+                        // CREATED는 결제 전 임시 주문도 포함되어 운영 화면의 "배송 준비" 의미와 달라질 수 있습니다.
+                        long preparing = orderRepository.countByStatus(OrderStatus.PAID);
                         long shipping = orderRepository.countByStatus(OrderStatus.SHIPPED);
                         long refundRequested = orderRepository.countByStatus(OrderStatus.REFUND_REQUESTED);
 
@@ -68,6 +69,7 @@ public class AdminDashboardService {
                                                         ReservationStatus.CANCELED,
                                                         ReservationStatus.CANCEL_REQUESTED));
 
+                        long activeReservations = reservationRepository.countByStatus(ReservationStatus.PAID);
                         long pendingCancel = reservationRepository.countByStatus(ReservationStatus.CANCEL_REQUESTED);
 
                         long totalCanceled = reservationRepository.countByStatus(ReservationStatus.CANCELED)
@@ -91,6 +93,7 @@ public class AdminDashboardService {
                                                         .refundRequested(refundRequested + pendingCancel)
                                                         .build())
                                         .reservations(AdminDashboardSummaryDto.ReservationSummary.builder()
+                                                        .activeCount(activeReservations)
                                                         .todayCount(todayReservations)
                                                         .pendingCancel(pendingCancel)
                                                         .totalCanceled(totalCanceled)

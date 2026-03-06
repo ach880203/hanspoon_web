@@ -39,6 +39,7 @@ jobs:
           OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
           OAUTH_KAKAO_CLIENT_ID: ${{ secrets.OAUTH_KAKAO_CLIENT_ID }}
           OAUTH_KAKAO_CLIENT_SECRET: ${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
 
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRATION: ${{ secrets.JWT_EXPIRATION }}
@@ -53,6 +54,7 @@ jobs:
 
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
           VITE_KAKAO_JS_KEY: ${{ secrets.VITE_KAKAO_JS_KEY }}
+          VITE_JUSO_API_KEY: ${{ secrets.VITE_JUSO_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -67,6 +69,7 @@ jobs:
             OAUTH_GOOGLE_CLIENT_SECRET
             OAUTH_KAKAO_CLIENT_ID
             OAUTH_KAKAO_CLIENT_SECRET
+            FRONTEND_URL
             JWT_SECRET
             JWT_EXPIRATION
             PORTONE_STORE_ID
@@ -77,6 +80,7 @@ jobs:
             KAKAO_REST_API_KEY
             VITE_API_BASE_URL
             VITE_KAKAO_JS_KEY
+            VITE_JUSO_API_KEY
           )
 
           for key in "${REQUIRED_KEYS[@]}"; do
@@ -101,6 +105,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          # 시크릿이 비어 있으면 리눅스 배포 기본 경로를 사용합니다.
+          UPLOAD_PATH="${{ secrets.UPLOAD_PATH }}"
+          ITEM_IMG_LOCATION="${{ secrets.ITEM_IMG_LOCATION }}"
+          if [ -z "${UPLOAD_PATH}" ]; then
+            UPLOAD_PATH="file:/opt/hanspoon/data/images/"
+          fi
+          if [ -z "${ITEM_IMG_LOCATION}" ]; then
+            ITEM_IMG_LOCATION="/opt/hanspoon/data/images"
+          fi
+
           {
             echo "SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}"
             echo "SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}"
@@ -109,6 +123,7 @@ jobs:
             echo "OAUTH_GOOGLE_CLIENT_SECRET=${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}"
             echo "OAUTH_KAKAO_CLIENT_ID=${{ secrets.OAUTH_KAKAO_CLIENT_ID }}"
             echo "OAUTH_KAKAO_CLIENT_SECRET=${{ secrets.OAUTH_KAKAO_CLIENT_SECRET }}"
+            echo "FRONTEND_URL=${{ secrets.FRONTEND_URL }}"
             echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
             echo "JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}"
             echo "PORTONE_STORE_ID=${{ secrets.PORTONE_STORE_ID }}"
@@ -117,6 +132,8 @@ jobs:
             echo "PORTONE_CHANNEL_KEY_TOSS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS }}"
             echo "PORTONE_CHANNEL_KEY_TOSS_PAYMENTS=${{ secrets.PORTONE_CHANNEL_KEY_TOSS_PAYMENTS }}"
             echo "KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}"
+            echo "UPLOAD_PATH=${UPLOAD_PATH}"
+            echo "ITEM_IMG_LOCATION=${ITEM_IMG_LOCATION}"
           } > hanspoon_backend/backend.env
           chmod 600 hanspoon_backend/backend.env
 
@@ -129,6 +146,7 @@ jobs:
           {
             echo "VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}"
             echo "VITE_KAKAO_JS_KEY=${{ secrets.VITE_KAKAO_JS_KEY }}"
+            echo "VITE_JUSO_API_KEY=${{ secrets.VITE_JUSO_API_KEY }}"
           } > .env.production
 
       # ----------------------------
@@ -214,12 +232,12 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_PORT: ${{ secrets.EC2_PORT }}
+          EC2_FALLBACK_HOST: ${{ secrets.EC2_FALLBACK_HOST }}
         run: |
           set -euo pipefail
 
-          # 임시 폴백 호스트: 현재 인프라 출력 기준 공인 IP
-          FALLBACK_HOST="3.36.180.241"
-          FALLBACK_PORT="22"
+          # 폴백 호스트는 선택값입니다. (예: EIP를 시크릿에 저장한 값)
+          FALLBACK_HOST="${EC2_FALLBACK_HOST:-}"
 
           HOST="${EC2_HOST}"
           # EC2_PORT 시크릿이 있으면 우선 사용하고, 없으면 22를 우선 후보로 사용합니다.
@@ -231,15 +249,22 @@ jobs:
           fi
 
           if [ -z "${HOST}" ]; then
-            echo "::warning::EC2_HOST가 비어 있어 폴백 호스트를 사용합니다."
-            HOST="${FALLBACK_HOST}"
+            if [ -n "${FALLBACK_HOST}" ]; then
+              echo "::warning::EC2_HOST가 비어 있어 EC2_FALLBACK_HOST를 사용합니다."
+              HOST="${FALLBACK_HOST}"
+            else
+              echo "::error::EC2_HOST가 비어 있고 EC2_FALLBACK_HOST도 없습니다."
+              exit 1
+            fi
           fi
 
           RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
           if [ -z "${RESOLVED_IPS}" ]; then
-            echo "::warning::EC2_HOST(${HOST}) DNS 해석에 실패해 폴백 호스트로 전환합니다."
-            HOST="${FALLBACK_HOST}"
-            RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            if [ -n "${FALLBACK_HOST}" ] && [ "${HOST}" != "${FALLBACK_HOST}" ]; then
+              echo "::warning::EC2_HOST(${HOST}) DNS 해석에 실패해 EC2_FALLBACK_HOST로 전환합니다."
+              HOST="${FALLBACK_HOST}"
+              RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            fi
           fi
 
           # GitHub Hosted Runner에서 사설IP는 접속 불가라 폴백합니다.
@@ -251,9 +276,11 @@ jobs:
             fi
           done
           if [ "${IS_PRIVATE_IP}" = "1" ]; then
-            echo "::warning::EC2_HOST(${HOST})가 사설 IP 대역으로 해석되어 폴백 호스트로 전환합니다."
-            HOST="${FALLBACK_HOST}"
-            RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            if [ -n "${FALLBACK_HOST}" ] && [ "${HOST}" != "${FALLBACK_HOST}" ]; then
+              echo "::warning::EC2_HOST(${HOST})가 사설 IP로 해석되어 EC2_FALLBACK_HOST로 전환합니다."
+              HOST="${FALLBACK_HOST}"
+              RESOLVED_IPS="$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            fi
           fi
 
           FINAL_HOST="${HOST}"
@@ -277,8 +304,8 @@ jobs:
 
           # 현재 호스트에서 모두 실패하면 폴백 호스트에서도 한 번 더 시도합니다.
           if [ -z "${SELECTED_PORT}" ]; then
-            if [ "${FINAL_HOST}" != "${FALLBACK_HOST}" ]; then
-              echo "::warning::${FINAL_HOST}에서 SSH 포트 탐색 실패. 폴백 호스트(${FALLBACK_HOST})로 재시도합니다."
+            if [ -n "${FALLBACK_HOST}" ] && [ "${FINAL_HOST}" != "${FALLBACK_HOST}" ]; then
+              echo "::warning::${FINAL_HOST}에서 SSH 포트 탐색 실패. EC2_FALLBACK_HOST(${FALLBACK_HOST})로 재시도합니다."
               FINAL_HOST="${FALLBACK_HOST}"
               for CANDIDATE_PORT in "${CANDIDATE_PORTS[@]}"; do
                 if ! [[ "${CANDIDATE_PORT}" =~ ^[0-9]+$ ]]; then
@@ -342,7 +369,17 @@ jobs:
             exit 1
           fi
 
-          if ! timeout 8 bash -c "cat < /dev/null > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
+          CONNECT_OK="0"
+          for attempt in 1 2 3; do
+            if timeout 8 bash -c "cat < /dev/null > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
+              CONNECT_OK="1"
+              break
+            fi
+            echo "::warning::SSH TCP 점검 ${attempt}/3 실패: ${HOST}:${PORT}"
+            sleep 3
+          done
+
+          if [ "${CONNECT_OK}" != "1" ]; then
             echo "::error::GitHub Runner에서 ${HOST}:${PORT} TCP 접속에 실패했습니다(i/o timeout 가능)."
             echo "::error::보안 그룹 인바운드(SSH), NACL, 라우팅(IGW), EC2 공인 IP/탄력 IP, 사설 서브넷 여부를 확인하세요."
             exit 1
@@ -363,7 +400,8 @@ jobs:
           source: deploy_bundle
           target: /tmp/hanspoon/${{ github.sha }}
           overwrite: true
-          timeout: 2m
+          timeout: 5m
+          command_timeout: 15m
 
       # ----------------------------
       # 9) EC2에서 배포 실행(릴리즈 + current 링크 + 서비스 재시작)

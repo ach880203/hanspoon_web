@@ -31,6 +31,7 @@ public class AdminDashboardSummaryDto {
     @Data
     @Builder
     public static class ReservationSummary {
+        private long activeCount;
         private long todayCount;
         private long pendingCancel;
         private long totalCanceled;
