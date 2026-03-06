@@ -10,9 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: EC2 배포
-    runs-on: [self-hosted, Linux, X64, hanspoon-deploy]
+  build:
+    name: 빌드 번들 생성
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     defaults:
@@ -27,8 +27,7 @@ jobs:
 
       # ----------------------------
       # 1) 시크릿 필수값 검사
-      #   - self-hosted runner 구조라 SSH/SCP 시크릿은 더 이상 필요하지 않습니다.
-      #   - 앱이 실제로 사용하는 값만 검사해서 배포 잡음을 줄입니다.
+      #   - 빌드에 실제로 쓰는 값만 점검해서 실패 원인을 명확하게 만듭니다.
       # ----------------------------
       - name: 배포/앱 시크릿 검사
         env:
@@ -142,13 +141,15 @@ jobs:
           } > .env.production
 
       # ----------------------------
-      # 3) 빌드
+      # 3) 백엔드/프런트 빌드
+      #   - 운영 서버 자원을 잡아먹지 않도록 GitHub Hosted Runner에서 수행합니다.
       # ----------------------------
       - name: JDK 21 설정
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
       - name: 백엔드 빌드
         id: backend_build
@@ -171,6 +172,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: hanspoon_frontend/package-lock.json
 
       - name: 프런트엔드 빌드
         working-directory: hanspoon_frontend
@@ -180,9 +183,54 @@ jobs:
           npm run build
 
       # ----------------------------
-      # 4) 동일 서버 로컬 배포
-      #   - self-hosted runner가 EC2 안에서 실행되므로 SSH/SCP가 필요 없습니다.
-      #   - 배포 실패 원인이던 Runner IP/SSH 포트 탐지 단계를 제거합니다.
+      # 4) 배포 번들 생성 및 업로드
+      #   - self-hosted runner는 이 산출물만 받아 배포합니다.
+      # ----------------------------
+      - name: 배포 번들 생성
+        run: |
+          set -euo pipefail
+
+          rm -rf deploy_bundle
+          mkdir -p deploy_bundle/backend deploy_bundle/frontend
+
+          cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
+          cp "hanspoon_backend/backend.env" "deploy_bundle/backend/.env"
+          chmod 600 "deploy_bundle/backend/.env"
+          cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
+
+          if [ -f deploy.md ]; then
+            cp deploy.md deploy_bundle/deploy.md
+          fi
+
+      - name: 배포 번들 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-bundle-${{ github.sha }}
+          path: deploy_bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: EC2 배포
+    needs: build
+    runs-on: [self-hosted, Linux, X64, hanspoon-deploy]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: 배포 번들 다운로드
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-bundle-${{ github.sha }}
+          path: deploy_bundle
+
+      # ----------------------------
+      # 5) 동일 서버 로컬 배포
+      #   - 운영 EC2에서는 파일 배치와 서비스 재시작만 수행합니다.
+      #   - 빌드 부하를 제거해서 러너 끊김 가능성을 낮춥니다.
       # ----------------------------
       - name: EC2 로컬 배포 실행
         env:
@@ -230,15 +278,16 @@ jobs:
 
           RELEASE_DIR="${APP_ROOT}/releases/${GITHUB_SHA}"
           CURRENT_LINK="${APP_ROOT}/current"
+          PAYLOAD_DIR="${GITHUB_WORKSPACE}/deploy_bundle"
 
           echo "[배포] 릴리즈 경로: ${RELEASE_DIR}"
           ${SUDO} rm -rf "${RELEASE_DIR}" || true
           ${SUDO} mkdir -p "${RELEASE_DIR}/backend" "${RELEASE_DIR}/frontend"
 
           echo "[배포] 파일 복사"
-          ${SUDO} cp "${GITHUB_WORKSPACE}/hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "${RELEASE_DIR}/backend/app.jar"
-          ${SUDO} cp "${GITHUB_WORKSPACE}/hanspoon_backend/backend.env" "${RELEASE_DIR}/backend/.env"
-          ${SUDO} cp -r "${GITHUB_WORKSPACE}/hanspoon_frontend/dist/." "${RELEASE_DIR}/frontend/"
+          ${SUDO} cp "${PAYLOAD_DIR}/backend/app.jar" "${RELEASE_DIR}/backend/app.jar"
+          ${SUDO} cp "${PAYLOAD_DIR}/backend/.env" "${RELEASE_DIR}/backend/.env"
+          ${SUDO} cp -r "${PAYLOAD_DIR}/frontend/." "${RELEASE_DIR}/frontend/"
 
           ${SUDO} mkdir -p "${APP_ROOT}/env"
           ${SUDO} cp "${RELEASE_DIR}/backend/.env" "${APP_ROOT}/env/backend.env"
@@ -246,8 +295,8 @@ jobs:
           ${SUDO} chown "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}/backend/.env" || true
           ${SUDO} chmod 600 "${RELEASE_DIR}/backend/.env" || true
 
-          if [ -f "${GITHUB_WORKSPACE}/deploy.md" ]; then
-            ${SUDO} cp "${GITHUB_WORKSPACE}/deploy.md" "${RELEASE_DIR}/deploy.md"
+          if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
+            ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"
           fi
 
           echo "[배포] current 링크 전환"
