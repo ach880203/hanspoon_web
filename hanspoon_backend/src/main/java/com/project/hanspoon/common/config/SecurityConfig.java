@@ -72,7 +72,9 @@ public class SecurityConfig {
                                                                 "/api/oneday/classes",
                                                                 "/api/oneday/classes/*",
                                                                 "/api/oneday/classes/*/sessions",
-                                                                "/api/oneday/sessions/search")
+                                                                "/api/oneday/sessions/search",
+                                                                "/api/oneday/reviews/classes/*",
+                                                                "/api/oneday/inquiries")
                                                 .permitAll()
                                                 .requestMatchers(HttpMethod.GET,
                                                                 "/api/recipe/list",

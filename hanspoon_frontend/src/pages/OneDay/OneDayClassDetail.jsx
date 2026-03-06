@@ -43,6 +43,7 @@ export const OneDayClassDetail = () => {
   const ratiosRef = useRef(new Map());
 
   const currentUserId = Number(resolveOneDayUserId() ?? 0);
+  const loggedIn = Boolean(loadAuth()?.accessToken);
   const admin = isOneDayAdmin();
   const instructor = isOneDayInstructor();
 
@@ -113,10 +114,16 @@ export const OneDayClassDetail = () => {
         getOneDayClassSessions(classId),
       ]);
 
+      // 비로그인 사용자는 인증이 필요한 요청을 아예 생략해서
+      // 상세 본문과 지도 로딩이 다른 보조 데이터 실패에 영향받지 않게 합니다.
       const [reviewData, myCompletedData, myWishData, inquiryData] = await Promise.all([
         fallbackOnUnauthorized(() => getOneDayClassReviews(classId), []),
-        fallbackOnUnauthorized(() => getMyOneDayReservations({ status: "COMPLETED", page: 0, size: 200 }), { content: [] }),
-        fallbackOnUnauthorized(() => getMyOneDayWishes(), []),
+        loggedIn
+          ? fallbackOnUnauthorized(() => getMyOneDayReservations({ status: "COMPLETED", page: 0, size: 200 }), { content: [] })
+          : Promise.resolve({ content: [] }),
+        loggedIn
+          ? fallbackOnUnauthorized(() => getMyOneDayWishes(), [])
+          : Promise.resolve([]),
         fallbackOnUnauthorized(() => getOneDayInquiries(), []),
       ]);
 
@@ -147,7 +154,7 @@ export const OneDayClassDetail = () => {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [classId, fallbackOnUnauthorized, location.state]);
+  }, [classId, fallbackOnUnauthorized, location.state, loggedIn]);
 
   useEffect(() => {
     loadClassData();
