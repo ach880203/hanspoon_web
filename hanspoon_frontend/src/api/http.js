@@ -1,56 +1,82 @@
 // src/api/http.js
 import { getAccessToken, clearAuth } from "../utils/authStorage";
 
-function normalizeApiPath(path) {
-  const normalizedPath = String(path || "").trim();
-  if (!normalizedPath) return "";
-  if (/^(?:https?:)?\/\//i.test(normalizedPath)) return normalizedPath;
-
-  const withLeadingSlash = normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`;
-  const normalizedBase = String(import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
-
-  // same-origin 프록시에서 base가 /api 인데 path도 /api/... 로 오면 /api/api/... 중복이 생깁니다.
-  if (normalizedBase === "/api" && withLeadingSlash.startsWith("/api/")) {
-    return withLeadingSlash.slice(4);
-  }
-
-  return withLeadingSlash;
+function isAbsoluteUrl(value) {
+  return /^(?:https?:)?\/\//i.test(String(value || "").trim());
 }
 
-function resolveFetchBaseUrl() {
-  const rawBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
-  if (!rawBaseUrl) {
-    return typeof window !== "undefined" ? window.location.origin : "";
+function normalizeRequestPath(path) {
+  const normalizedPath = String(path || "").trim();
+  if (!normalizedPath) return "";
+  if (isAbsoluteUrl(normalizedPath)) return normalizedPath;
+  return normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`;
+}
+
+function getConfiguredBaseUrl() {
+  return String(import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+}
+
+function shouldStripApiPrefix(baseUrl, requestPath) {
+  return !!baseUrl && /\/api$/i.test(baseUrl) && requestPath.startsWith("/api/");
+}
+
+function buildRelativePath(baseUrl, requestPath) {
+  if (shouldStripApiPrefix(baseUrl, requestPath)) {
+    return requestPath.replace(/^\/api\//, "");
+  }
+  return requestPath.replace(/^\//, "");
+}
+
+function buildStringUrl(path) {
+  const requestPath = normalizeRequestPath(path);
+  if (!requestPath || isAbsoluteUrl(requestPath)) return requestPath;
+
+  const baseUrl = getConfiguredBaseUrl();
+  if (!baseUrl) {
+    return requestPath;
   }
 
-  // new URL(path, base)는 base가 절대 URL이어야 하므로, 상대 base(/api)는 현재 origin 기준으로 보정합니다.
-  if (/^(?:https?:)?\/\//i.test(rawBaseUrl)) {
-    return rawBaseUrl.replace(/\/+$/, "");
+  // same-origin ?꾨줉?쒖뿉??base媛 /api ?닿퀬 path媛 /api/... ?대㈃ /api/api/... 以묐났??留됱뒿?덈떎.
+  if (shouldStripApiPrefix(baseUrl, requestPath)) {
+    return `${baseUrl}${requestPath.slice(4)}`;
   }
 
-  if (typeof window !== "undefined") {
-    return new URL(rawBaseUrl.replace(/^\//, ""), `${window.location.origin}/`).href.replace(/\/+$/, "");
+  return `${baseUrl}${requestPath}`;
+}
+
+function buildAbsoluteBaseUrl(baseUrl) {
+  if (!baseUrl) {
+    return typeof window !== "undefined" ? `${window.location.origin}/` : "";
   }
 
-  return rawBaseUrl.replace(/\/+$/, "");
+  if (isAbsoluteUrl(baseUrl)) {
+    return `${baseUrl}/`.replace(/([^:]\/)\/+/g, "$1");
+  }
+
+  if (typeof window === "undefined") {
+    return `${baseUrl}/`.replace(/\/+/g, "/");
+  }
+
+  const normalizedBasePath = baseUrl.replace(/^\/+/, "");
+  return new URL(`${normalizedBasePath}/`, `${window.location.origin}/`).href;
 }
 
 function buildUrl(path, params) {
-  const normalizedPath = normalizeApiPath(path);
-
-  if (!params) {
-    const baseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
-
-    // 상대 경로 기반 프록시를 쓸 때는 /api/api 중복이 생기지 않도록 정규화한 path를 붙입니다.
-    if (baseUrl && normalizedPath.startsWith("/")) {
-      const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
-      return `${normalizedBaseUrl}${normalizedPath}`;
-    }
-    return normalizedPath;
+  const requestPath = normalizeRequestPath(path);
+  if (!requestPath || isAbsoluteUrl(requestPath)) {
+    return requestPath;
   }
 
-  const baseUrl = resolveFetchBaseUrl();
-  const url = new URL(normalizedPath, baseUrl);
+  if (!params) {
+    return buildStringUrl(requestPath);
+  }
+
+  const baseUrl = getConfiguredBaseUrl();
+  const absoluteBaseUrl = buildAbsoluteBaseUrl(baseUrl);
+  const relativePath = buildRelativePath(baseUrl, requestPath);
+  const url = baseUrl
+    ? new URL(relativePath, absoluteBaseUrl)
+    : new URL(requestPath, absoluteBaseUrl);
 
   Object.entries(params).forEach(([k, v]) => {
     if (v === undefined || v === null || v === "") return;
@@ -78,12 +104,12 @@ async function request(path, { method = "GET", params, body, headers } = {}) {
 
   const isFormData = body instanceof FormData;
 
-  // JSON 본문일 때만 Content-Type을 자동 설정합니다.
+  // JSON 蹂몃Ц???뚮쭔 Content-Type???먮룞 ?ㅼ젙?⑸땲??
   if (body && !isFormData && !h.has("Content-Type")) {
     h.set("Content-Type", "application/json");
   }
 
-  // params를 URL에 붙입니다.
+  // params瑜?URL??遺숈엯?덈떎.
   const url = buildUrl(path, params);
 
   const res = await fetch(url, {
@@ -92,7 +118,7 @@ async function request(path, { method = "GET", params, body, headers } = {}) {
     body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
   });
 
-  // 401이면 토큰 만료/로그아웃 처리를 합니다.
+  // 401?대㈃ ?좏겙 留뚮즺/濡쒓렇?꾩썐 泥섎━瑜??⑸땲??
   if (res.status === 401) {
     clearAuth();
   }
@@ -104,7 +130,7 @@ async function request(path, { method = "GET", params, body, headers } = {}) {
     ? await res.json().catch(() => null)
     : await res.text().catch(() => null);
 
-  // ApiResponse 래퍼면 data만 꺼내기
+  // ApiResponse ?섑띁硫?data留?爰쇰깄?덈떎.
   const data =
     payload && typeof payload === "object" && "data" in payload ? payload.data : payload;
   const message =
@@ -130,7 +156,7 @@ export function toErrorMessage(err) {
 }
 
 export const http = {
-  // opt를 그대로 받도록 유지
+  // opt瑜?洹몃?濡?諛쏅룄濡??좎??⑸땲??
   get: (path, opt) => request(path, opt),
   post: (path, body, opt) => request(path, { method: "POST", body, ...opt }),
   put: (path, body, opt) => request(path, { method: "PUT", body, ...opt }),
