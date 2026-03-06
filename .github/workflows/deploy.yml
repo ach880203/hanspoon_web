@@ -207,6 +207,7 @@ jobs:
         with:
           name: deploy-bundle-${{ github.sha }}
           path: deploy_bundle
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
