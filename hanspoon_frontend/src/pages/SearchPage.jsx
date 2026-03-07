@@ -17,7 +17,15 @@ const SearchResultCard = ({ item, type }) => {
     // 레시피 이미지 경로 처리
     const image = type === "recipe"
         ? (item.recipeImg ? toBackendUrl(`/images/recipe/${item.recipeImg}`) : "/images/recipe/default.jpg")
-        : (item.mainImage || item.thumbnail || item.imageUrl || "https://via.placeholder.com/300");
+        : (
+            item.mainImageData ||
+            item.thumbnailUrl ||
+            item.imageUrl ||
+            item.detailImageData ||
+            item.mainImage ||
+            item.thumbnail ||
+            "/img/banner-duck.png"
+        );
 
     return (
         <Link to={link} className="search-result-card">
