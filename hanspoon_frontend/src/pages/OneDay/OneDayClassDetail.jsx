@@ -93,6 +93,21 @@ export const OneDayClassDetail = () => {
     };
   };
 
+  const moveToLoginForReservation = useCallback(() => {
+    const nextPath = `${location.pathname}${location.search}${location.hash}`;
+    sessionStorage.setItem("post_login_redirect", nextPath);
+
+    navigate("/login", {
+      state: {
+        from: {
+          pathname: location.pathname,
+          search: location.search,
+          hash: location.hash,
+        },
+      },
+    });
+  }, [location.hash, location.pathname, location.search, navigate]);
+
   const fallbackOnUnauthorized = useCallback(async (request, fallbackValue) => {
     try {
       return await request();
@@ -326,6 +341,11 @@ export const OneDayClassDetail = () => {
   }, [reviewableReservations, selectedReservationId]);
 
   const handleHoldOnly = async (sessionId) => {
+    if (!loggedIn) {
+      moveToLoginForReservation();
+      return;
+    }
+
     setError("");
     setMessage("");
     setReservingSessionId(sessionId);
@@ -345,6 +365,11 @@ export const OneDayClassDetail = () => {
   };
 
   const handleDirectPayment = async (sessionId, sessionPrice) => {
+    if (!loggedIn) {
+      moveToLoginForReservation();
+      return;
+    }
+
     setError("");
     setMessage("");
     setReservingSessionId(sessionId);

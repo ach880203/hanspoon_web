@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { toBackendUrl } from "../utils/backendUrl";
@@ -7,6 +7,7 @@ import "./Auth/Auth.css";
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const googleOAuthUrl = toBackendUrl("/oauth2/authorization/google");
   const kakaoOAuthUrl = toBackendUrl("/oauth2/authorization/kakao");
 
@@ -20,16 +21,34 @@ export default function LoginPage() {
     setIsCapsLockOn(e.getModifierState("CapsLock"));
   };
 
+  const resolveNextPath = () => {
+    const savedNextPath = sessionStorage.getItem("post_login_redirect");
+    const next = location.state?.from;
+    if ((!next || typeof next !== "object") && savedNextPath) {
+      sessionStorage.removeItem("post_login_redirect");
+      return savedNextPath;
+    }
+    if (!next || typeof next !== "object") return "/";
+
+    const pathname = typeof next.pathname === "string" ? next.pathname : "/";
+    const search = typeof next.search === "string" ? next.search : "";
+    const hash = typeof next.hash === "string" ? next.hash : "";
+    const nextPath = `${pathname}${search}${hash}`;
+    sessionStorage.removeItem("post_login_redirect");
+    return nextPath;
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr(null);
     setBusy(true);
     try {
       const res = await login(email, password);
+      const nextPath = resolveNextPath();
       if (res.isFirstLogin) {
-        navigate("/", { state: { showWelcomeModal: true } });
+        navigate(nextPath, { state: { showWelcomeModal: true } });
       } else {
-        navigate("/");
+        navigate(nextPath);
       }
     } catch (e) {
       setErr(e.message || "로그인에 실패했습니다.");

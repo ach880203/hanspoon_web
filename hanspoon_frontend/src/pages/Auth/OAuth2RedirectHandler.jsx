@@ -15,6 +15,7 @@ const OAuth2RedirectHandler = () => {
 
         const run = async () => {
             const token = getUrlParameter('token');
+            const nextPath = sessionStorage.getItem('post_login_redirect') || '/';
 
             if (token) {
                 // 토큰 저장
@@ -36,13 +37,15 @@ const OAuth2RedirectHandler = () => {
                     });
 
                     const isFirst = me?.spoonBalance === 3000;
+                    sessionStorage.removeItem('post_login_redirect');
                     if (isFirst) {
-                        navigate('/', { state: { showWelcomeModal: true } });
+                        navigate(nextPath, { state: { showWelcomeModal: true } });
                     } else {
-                        navigate('/');
+                        navigate(nextPath);
                     }
                 } catch {
                     // 실패 시 포괄적인 처리: 루트로 이동
+                    sessionStorage.removeItem('post_login_redirect');
                     window.location.href = '/';
                 }
             } else {
@@ -66,3 +69,4 @@ const OAuth2RedirectHandler = () => {
 };
 
 export default OAuth2RedirectHandler;
+
