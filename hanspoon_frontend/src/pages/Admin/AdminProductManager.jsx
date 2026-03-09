@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createAdminProduct,
+  deleteAdminProduct,
   deleteProductImage,
   fetchAdminProductDetail,
   fetchAdminProducts,
@@ -483,6 +484,36 @@ export default function AdminProductManager() {
     }
   };
 
+  const handleDelete = async () => {
+    const targetId = Number(form.id || selectedProductId || 0);
+    if (!targetId) {
+      setError("삭제할 상품 ID가 없습니다.");
+      return;
+    }
+
+    const productName = String(form.name || "").trim() || `상품 #${targetId}`;
+    const confirmed = window.confirm(
+      `${productName} 상품을 삭제할까요?\n상품 이미지, 장바구니, 찜, 문의, 리뷰도 함께 정리되며 이 작업은 되돌릴 수 없습니다.`
+    );
+    if (!confirmed) return;
+
+    setSubmitting(true);
+    setError("");
+    setMessage("");
+
+    try {
+      await deleteAdminProduct(targetId);
+      resetForm();
+      setMode("list");
+      setMessage("상품을 삭제했습니다.");
+      await loadProducts();
+    } catch (e) {
+      setError(e?.message || "상품 삭제에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const listTitle = useMemo(() => {
     const categoryLabel = CATEGORY_OPTIONS.find((item) => item.value === categoryFilter)?.label || "전체 카테고리";
     return `${categoryLabel} · 총 ${totalCount}건`;
@@ -785,6 +816,11 @@ export default function AdminProductManager() {
                 <button type="submit" className="btn-primary" disabled={submitting}>
                   {submitting ? "처리 중..." : mode === "create" ? "등록하기" : "수정 저장"}
                 </button>
+                {mode === "edit" ? (
+                  <button type="button" className="btn-danger" onClick={handleDelete} disabled={submitting}>
+                    {submitting ? "처리 중..." : "상품 삭제"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn-ghost"

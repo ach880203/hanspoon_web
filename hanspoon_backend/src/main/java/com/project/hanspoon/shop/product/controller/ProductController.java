@@ -154,4 +154,20 @@ public class ProductController {
     ) {
         return ResponseEntity.ok(productService.update(id, dto));
     }
+
+    /**
+     * ✅ 상품 삭제
+     *
+     * 요청 예:
+     * DELETE /api/products/{id}
+     *
+     * 처리 포인트:
+     * - 상품과 연결된 이미지/장바구니/찜/문의/리뷰를 함께 정리한 뒤 삭제
+     * - 성공 시 204 No Content 반환
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        productService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
 }

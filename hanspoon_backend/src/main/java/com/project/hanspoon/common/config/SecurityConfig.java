@@ -89,6 +89,8 @@ public class SecurityConfig {
                                                 .hasAuthority("ROLE_ADMIN")
                                                 .requestMatchers(HttpMethod.PUT, "/api/products/*")
                                                 .hasAuthority("ROLE_ADMIN")
+                                                .requestMatchers(HttpMethod.DELETE, "/api/products/*")
+                                                .hasAuthority("ROLE_ADMIN")
                                                 .requestMatchers(HttpMethod.POST, "/api/products/*/images")
                                                 .hasAuthority("ROLE_ADMIN")
                                                 .requestMatchers(HttpMethod.DELETE, "/api/products/*/images/*")

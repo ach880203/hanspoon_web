@@ -18,5 +18,7 @@ public interface WishProductRepository extends JpaRepository<WishProduct, Long> 
 
     List<WishProduct> findByUser_UserIdOrderByIdDesc(Long userId);
 
+    void deleteByProduct_Id(Long productId);
+
     long countByProduct_Id(Long productId);
 }

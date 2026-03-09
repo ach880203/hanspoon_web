@@ -17,5 +17,7 @@ public interface InqProductRepository extends JpaRepository<InqProduct, Long> {
 
     Optional<InqProduct> findByIdAndUser_UserId(Long inqId, Long userId);
 
+    void deleteByProduct_Id(Long productId);
+
     long countByAnsweredYnFalse();
 }

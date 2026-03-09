@@ -17,6 +17,8 @@ public interface RevProductRepository extends JpaRepository<RevProduct, Long> {
 
     Optional<RevProduct> findByIdAndUser_UserId(Long revId, Long userId);
 
+    void deleteByProduct_Id(Long productId);
+
     // ✅ (중요) countQuery 명시해서 validation 실패 방지
     @Query(
             value = """

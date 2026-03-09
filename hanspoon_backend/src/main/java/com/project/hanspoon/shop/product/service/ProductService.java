@@ -1,5 +1,7 @@
 package com.project.hanspoon.shop.product.service;
 
+import com.project.hanspoon.shop.cart.repository.CartItemRepository;
+import com.project.hanspoon.shop.inquiry.repository.InqProductRepository;
 import com.project.hanspoon.shop.constant.ProductSort;
 import com.project.hanspoon.shop.product.dto.*;
 import com.project.hanspoon.shop.product.entity.Product;
@@ -8,8 +10,9 @@ import com.project.hanspoon.shop.product.entity.ProductImageType;
 import com.project.hanspoon.shop.mapper.ProductMapper;
 import com.project.hanspoon.shop.product.repository.ProductImageRepository;
 import com.project.hanspoon.shop.product.repository.ProductRepository;
-
 import com.project.hanspoon.shop.product.repository.spec.ProductSpecifications;
+import com.project.hanspoon.shop.review.repository.RevProductRepository;
+import com.project.hanspoon.shop.wish.repository.WishProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
@@ -39,6 +42,10 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final ProductImageRepository productImageRepository;
     private final ProductImageService productImageService;
+    private final CartItemRepository cartItemRepository;
+    private final InqProductRepository inqProductRepository;
+    private final RevProductRepository revProductRepository;
+    private final WishProductRepository wishProductRepository;
 
     /**
      * ✅ 상품 목록 조회
@@ -245,5 +252,33 @@ public class ProductService {
 
         // 수정 후 상세 응답 반환
         return getDetail(id);
+    }
+
+    /**
+     * ✅ 상품 삭제
+     * - 상품을 직접 참조하는 데이터(이미지/장바구니/찜/문의/리뷰)를 먼저 정리한 뒤 상품 본체를 삭제
+     * - 주문 항목은 상품 스냅샷(productId, productName)을 별도 컬럼으로 보관하므로 여기서 직접 삭제하지 않음
+     * - 관리자 화면에서 "삭제 후 목록 재조회"가 자연스럽게 동작하도록 예외는 404/런타임으로 그대로 전달
+     */
+    @Transactional
+    public void delete(Long id) {
+
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "상품이 없습니다. id=" + id));
+
+        // 파일 시스템에 저장된 이미지까지 함께 지우기 위해 이미지 서비스의 삭제 흐름을 재사용한다.
+        // 대표 이미지 승격 로직이 중간에 동작해도 최종적으로 상품 자체를 삭제하므로 문제되지 않는다.
+        List<ProductImage> images = productImageRepository.findByProduct_IdOrderByRepYnDescIdAsc(id);
+        for (ProductImage image : images) {
+            productImageService.delete(id, image.getId());
+        }
+
+        // 상품 FK를 직접 잡고 있는 데이터들을 먼저 비워야 마지막 상품 삭제에서 외래키 오류가 나지 않는다.
+        cartItemRepository.deleteByProduct_Id(id);
+        wishProductRepository.deleteByProduct_Id(id);
+        inqProductRepository.deleteByProduct_Id(id);
+        revProductRepository.deleteByProduct_Id(id);
+
+        productRepository.delete(product);
     }
 }

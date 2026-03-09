@@ -20,6 +20,10 @@ export async function updateAdminProduct(productId, payload) {
   return res.data;
 }
 
+export async function deleteAdminProduct(productId) {
+  await http.del(`/api/products/${Number(productId)}`);
+}
+
 export async function fetchProductImages(productId, type = "MAIN") {
   const res = await http.get(`/api/products/${Number(productId)}/images`, { params: { type } });
   return Array.isArray(res.data) ? res.data : [];
