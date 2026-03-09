@@ -9,7 +9,7 @@ import { getRecipeList } from "../api/recipeApi";
 import { bannerApi } from "../api/commonApi";
 import EventPopup from "../components/EventPopup/EventPopup";
 import { toBackendUrl } from "../utils/backendUrl";
-import { toClassExposureStatus } from "../utils/onedayClassUtils";
+import { toClassExposureStatus, toClassSlotStatus } from "../utils/onedayClassUtils";
 
 
 const FALLBACK_RECIPE_IMG = "/img/banner-chicken.png";
@@ -100,16 +100,19 @@ export default function HomePage() {
         const data = await getOneDayClasses({ page: 0, size: 24, sort: "createdAt,desc" });
         const list = Array.isArray(data) ? data : Array.isArray(data?.content) ? data.content : [];
 
-        const exposureByClassId = new Map();
+        const classStatusByClassId = new Map();
         await Promise.all(
           list.map(async (item) => {
             const id = Number(item?.id ?? item?.classId ?? 0);
             if (!id) return;
             try {
               const sessions = await getOneDayClassSessions(id);
-              exposureByClassId.set(id, toClassExposureStatus(sessions, CLASS_EXPOSURE_DAYS));
+              classStatusByClassId.set(id, {
+                ...toClassExposureStatus(sessions, CLASS_EXPOSURE_DAYS),
+                ...toClassSlotStatus(sessions),
+              });
             } catch {
-              exposureByClassId.set(id, { shouldExpose: true, openScheduled: false });
+              classStatusByClassId.set(id, { shouldExpose: true, openScheduled: false, classEnded: false });
             }
           })
         );
@@ -117,7 +120,10 @@ export default function HomePage() {
         const visibleList = list
           .filter((item) => {
             const id = Number(item?.id ?? item?.classId ?? 0);
-            return exposureByClassId.get(id)?.shouldExpose ?? true;
+            const status = classStatusByClassId.get(id);
+            // 메인 홈에서는 종료된 클래스 썸네일이 보이지 않도록 목록에서 제외합니다.
+            if (status?.classEnded) return false;
+            return status?.shouldExpose ?? true;
           })
           .slice(0, 8);
 
@@ -127,7 +133,7 @@ export default function HomePage() {
           const category = c?.categoryLabel ?? c?.category ?? "";
           const level = c?.levelLabel ?? c?.level ?? "";
           const runType = c?.runType ?? ""; // ALWAYS / EVENT 등
-          const openScheduled = exposureByClassId.get(Number(id))?.openScheduled ?? false;
+          const openScheduled = classStatusByClassId.get(Number(id))?.openScheduled ?? false;
           return {
             id,
             title,
