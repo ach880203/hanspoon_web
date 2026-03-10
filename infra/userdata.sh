@@ -11,14 +11,14 @@ echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium
 sudo apt-get update -y
 sudo apt-get install -y temurin-21-jdk
 
-# 배포 폴더
+# 배포 루트
 sudo mkdir -p /opt/hanspoon/current/backend
 sudo mkdir -p /opt/hanspoon/current/frontend
 sudo mkdir -p /opt/hanspoon/env
 sudo mkdir -p /opt/hanspoon/data/images
 sudo chown -R ubuntu:ubuntu /opt/hanspoon
 
-# systemd 서비스(백엔드)
+# systemd 서비스: 백엔드
 sudo tee /etc/systemd/system/hanspoon-backend.service > /dev/null <<'EOF'
 [Unit]
 Description=hanspoon backend
@@ -39,7 +39,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable hanspoon-backend.service
 
-# 백엔드 헬스체크 실패 시 자동 재시작(운영 안정화)
+# 백엔드 헬스체크 실패 시 자동 재시작 운영 설정
 sudo tee /usr/local/bin/hanspoon-healthcheck.sh > /dev/null <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -86,11 +86,21 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now hanspoon-healthcheck.timer
 
-# nginx: 프런트 정적 + /api -> 8080 프록시
+# nginx: 프론트 정적 파일 + OAuth2 + /api 프록시
 sudo tee /etc/nginx/sites-available/hanspoon > /dev/null <<'EOF'
+map $http_x_forwarded_proto $forwarded_proto {
+  default $http_x_forwarded_proto;
+  ""      $scheme;
+}
+
+map $http_x_forwarded_host $forwarded_host {
+  default $http_x_forwarded_host;
+  ""      $host;
+}
+
 server {
   listen 80;
-  server_name _;
+  server_name hanspoon.store www.hanspoon.store;
 
   root /opt/hanspoon/current/frontend;
   index index.html;
@@ -100,13 +110,15 @@ server {
     try_files $uri $uri/ =404;
   }
 
-  # OAuth2 시작/콜백 경로를 백엔드로 전달합니다.
+  # OAuth2 시작/콜백 경로는 스프링 시큐리티가 처리하므로 백엔드로 그대로 전달합니다.
   location /oauth2/ {
     proxy_pass http://127.0.0.1:8080/oauth2/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    proxy_set_header X-Forwarded-Host $forwarded_host;
   }
 
   location /login/oauth2/ {
@@ -115,19 +127,23 @@ server {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    proxy_set_header X-Forwarded-Host $forwarded_host;
   }
 
   location / {
     try_files $uri $uri/ /index.html;
   }
 
-  # /api/api/* -> backend /api/* (기존 프런트 호출 호환)
+  # /api/api/* -> backend /api/* (기존 프론트 호출 호환)
   location /api/api/ {
     proxy_pass http://127.0.0.1:8080/api/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    proxy_set_header X-Forwarded-Host $forwarded_host;
   }
 
   # /api/* -> backend /api/*
@@ -137,10 +153,15 @@ server {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    proxy_set_header X-Forwarded-Host $forwarded_host;
   }
 
   location = /api/actuator/health {
     proxy_pass http://127.0.0.1:8080/actuator/health;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    proxy_set_header X-Forwarded-Host $forwarded_host;
   }
 }
 EOF

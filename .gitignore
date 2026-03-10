@@ -1,0 +1,8 @@
+.idea/
+
+# GitHub Actions 시크릿용 Terraform 로컬 상태 파일
+infra/github_actions_secrets/.terraform/
+infra/github_actions_secrets/.terraform.lock.hcl
+infra/github_actions_secrets/terraform.tfstate
+infra/github_actions_secrets/terraform.tfstate.*
+infra/github_actions_secrets/*.auto.tfvars.json

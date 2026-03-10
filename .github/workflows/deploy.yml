@@ -191,12 +191,13 @@ jobs:
           set -euo pipefail
 
           rm -rf deploy_bundle
-          mkdir -p deploy_bundle/backend deploy_bundle/frontend
+          mkdir -p deploy_bundle/backend deploy_bundle/frontend deploy_bundle/infra/nginx
 
           cp "hanspoon_backend/${{ steps.backend_build.outputs.jar_path }}" "deploy_bundle/backend/app.jar"
           cp "hanspoon_backend/backend.env" "deploy_bundle/backend/backend.env"
           chmod 600 "deploy_bundle/backend/backend.env"
           cp -R hanspoon_frontend/dist/. deploy_bundle/frontend/
+          cp "infra/nginx/hanspoon.conf" "deploy_bundle/infra/nginx/hanspoon.conf"
 
           if [ -f deploy.md ]; then
             cp deploy.md deploy_bundle/deploy.md
@@ -309,6 +310,15 @@ jobs:
 
           if [ -f "${PAYLOAD_DIR}/deploy.md" ]; then
             ${SUDO} cp "${PAYLOAD_DIR}/deploy.md" "${RELEASE_DIR}/deploy.md"
+          fi
+
+          # 이미 생성된 EC2는 userdata가 다시 실행되지 않으므로,
+          # 배포 번들에 포함한 nginx 설정으로 운영 서버 설정 드리프트를 같이 맞춥니다.
+          if [ -f "${PAYLOAD_DIR}/infra/nginx/hanspoon.conf" ]; then
+            ${SUDO} mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+            ${SUDO} cp "${PAYLOAD_DIR}/infra/nginx/hanspoon.conf" /etc/nginx/sites-available/hanspoon
+            ${SUDO} ln -sfn /etc/nginx/sites-available/hanspoon /etc/nginx/sites-enabled/hanspoon
+            ${SUDO} rm -f /etc/nginx/sites-enabled/default
           fi
 
           echo "[배포] current 링크 전환"

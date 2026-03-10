@@ -65,6 +65,20 @@ class OAuth2AuthenticationSuccessHandlerTest {
                 .isEqualTo("https://www.hanspoon.com/oauth2/redirect?token=test-jwt-token");
     }
 
+    @Test
+    @DisplayName("FRONTEND_URL이 운영 도메인이면 해당 주소로 리다이렉트한다")
+    void shouldRedirectToHanspoonStore() throws Exception {
+        ReflectionTestUtils.setField(successHandler, "frontendUrl", "https://hanspoon.store");
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        successHandler.onAuthenticationSuccess(request, response, createAuthentication());
+
+        assertThat(response.getRedirectedUrl())
+                .isEqualTo("https://hanspoon.store/oauth2/redirect?token=test-jwt-token");
+    }
+
     private Authentication createAuthentication() {
         User user = User.builder()
                 .email("tester@hanspoon.com")
