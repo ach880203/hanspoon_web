@@ -110,9 +110,9 @@ server {
     try_files $uri $uri/ =404;
   }
 
-  # OAuth2 시작/콜백 경로는 스프링 시큐리티가 처리하므로 백엔드로 그대로 전달합니다.
-  location /oauth2/ {
-    proxy_pass http://127.0.0.1:8080/oauth2/;
+  # OAuth2 시작 경로만 백엔드로 보내고, /oauth2/redirect 는 프론트 라우트로 남겨 둡니다.
+  location /oauth2/authorization/ {
+    proxy_pass http://127.0.0.1:8080/oauth2/authorization/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;

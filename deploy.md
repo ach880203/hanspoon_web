@@ -103,8 +103,8 @@ server {
   listen 80;
   server_name hanspoon.store www.hanspoon.store;
 
-  location /oauth2/ {
-    proxy_pass http://127.0.0.1:8080/oauth2/;
+  location /oauth2/authorization/ {
+    proxy_pass http://127.0.0.1:8080/oauth2/authorization/;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $forwarded_proto;
@@ -117,6 +117,7 @@ server {
 
 - ALB가 HTTPS를 종료한 뒤 nginx로 HTTP를 넘기더라도, 원래 요청이 HTTPS였다는 정보를 백엔드가 알 수 있게 했다.
 - 이 값이 없으면 스프링이 콜백과 리다이렉트 URL을 `http`로 오인할 수 있다.
+- `/oauth2/redirect`는 프론트 라우트이므로 프록시 대상에서 제외해야 한다.
 
 ## 4. GitHub Actions 시크릿 Terraform 관리
 
