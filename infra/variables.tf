@@ -3,6 +3,17 @@ variable "project_name" {
   default = "hanspoon"
 }
 
+variable "deployment_mode" {
+  type        = string
+  default     = "active"
+  description = "active=전체 운영, sleep=EC2만 중지, parked=EC2 중지 + RDS 삭제(스냅샷 복원용)"
+
+  validation {
+    condition     = contains(["active", "sleep", "parked"], var.deployment_mode)
+    error_message = "deployment_mode 는 active, sleep, parked 중 하나여야 합니다."
+  }
+}
+
 variable "region" {
   type    = string
   default = "ap-northeast-2"
@@ -56,4 +67,22 @@ variable "db_username" {
 variable "db_password" {
   type      = string
   sensitive = true
+}
+
+variable "parked_db_final_snapshot_identifier" {
+  type        = string
+  default     = ""
+  description = "parked 모드로 닫을 때 생성할 최종 RDS 스냅샷 이름"
+}
+
+variable "restore_db_from_snapshot" {
+  type        = bool
+  default     = false
+  description = "true 면 restore_db_snapshot_identifier 스냅샷으로 RDS 를 복원합니다."
+}
+
+variable "restore_db_snapshot_identifier" {
+  type        = string
+  default     = ""
+  description = "restore_db_from_snapshot=true 일 때 복원할 RDS 스냅샷 이름"
 }
